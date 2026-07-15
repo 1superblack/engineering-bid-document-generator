@@ -1,5 +1,7 @@
 # 工程标书生成器 · 开源引擎版 (Engineering Bid Document Generator — Open Engine)
 
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python) ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg) ![CI](https://github.com/1superblack/engineering-bid-document-generator/actions/workflows/ci.yml/badge.svg) ![Language](https://img.shields.io/github/languages/top/1superblack/engineering-bid-document-generator?color=yellowgreen) ![Stars](https://img.shields.io/github/stars/1superblack/engineering-bid-document-generator?style=social)
+
 > 本地优先、数据不出本机的工程投标书一键生成引擎。**本仓库是「开源引擎版（Lite）」**：核心生成引擎 + 通用工程语料完全开放可验；竞争性的「评分策略精调 / 差异化弹药库」完整内容托管在 [WorkBuddy SkillHub 完整版](https://skillhub.cn/)。
 
 ---
