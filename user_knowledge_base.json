@@ -1,0 +1,51 @@
+{
+  "_meta": {
+    "description": "企业知识库 v1.0 — 投标企业资料持久化，供标书生成跨项目复用。请将所有示例值替换为贵司真实信息；空字符串/空数组表示待填写。星号条款、强制资质、业绩、人员等字段将直接用于偏离表比对与以标写标。",
+    "version": "1.0",
+    "usage": "在 generate_bid_document 请求中设置 enable_knowledge_base=true（默认）即可自动加载本文件；也可用 knowledge_base_path 指定其他路径。"
+  },
+  "company": {
+    "name": "示例建设集团有限公司",
+    "legal_person": "张三",
+    "registered_capital": "5000万元",
+    "net_assets": "8000万元",
+    "credit_code": "91310000XXXXXXXXXX",
+    "address": "上海市浦东新区XX路XX号",
+    "established_year": "2005",
+    "credit_rating": "AAA",
+    "qualifications": [
+      "建筑装修装饰工程专业承包一级",
+      "建筑幕墙工程专业承包一级",
+      "建筑工程施工总承包二级",
+      "钢结构工程专业承包二级"
+    ],
+    "description": "示例建设集团有限公司成立于2005年，注册资本5000万元，主营建筑装饰装修、幕墙及总承包工程，年产值超5亿元。"
+  },
+  "key_personnel": [
+    {"role": "项目经理", "name": "李四", "cert": "一级建造师（建筑工程）", "cert_no": "沪123456789", "major": "建筑工程", "title": "高级工程师"},
+    {"role": "技术负责人", "name": "王五", "cert": "高级工程师", "major": "结构工程", "title": "教授级高工"},
+    {"role": "安全负责人", "name": "赵六", "cert": "注册安全工程师", "major": "安全工程"}
+  ],
+  "similar_projects": [
+    {"name": "某商业综合体装饰装修工程", "amount": "约1200万元", "scale": "18000㎡", "year": "2023", "role": "总承包", "award": "XX杯优质工程"},
+    {"name": "某办公楼精装修工程", "amount": "约800万元", "scale": "12000㎡", "year": "2022", "role": "装饰装修"},
+    {"name": "某医院改扩建幕墙工程", "amount": "约1500万元", "scale": "幕墙2.3万㎡", "year": "2021", "role": "幕墙专业分包"}
+  ],
+  "equipment": [
+    {"name": "吊篮", "model": "ZLP630", "count": 8, "status": "良好"},
+    {"name": "高空作业车", "model": "CDZ-22", "count": 2, "status": "良好"},
+    {"name": "石材切割机", "model": "SQ-400", "count": 3, "status": "良好"}
+  ],
+  "templates": {
+    "commitment_prefix": "我方郑重承诺：",
+    "quality_target": "确保工程质量达到国家验收标准合格，力争获得省级以上优质工程奖",
+    "safety_commitment": "严格遵守安全生产法律法规，确保零死亡、零群伤事故"
+  },
+  "products": [
+    {"name": "示例牌环保乳胶漆", "brand": "示例牌", "model": "内墙环保型", "usage": "内墙涂装"},
+    {"name": "示例牌铝合金型材", "brand": "示例牌", "model": "6063-T5", "usage": "幕墙骨架"}
+  ],
+  "images": [
+    {"name": "企业Logo", "path": "", "desc": "用于封面与页眉（建议尺寸 200x60px，放置于 assets/ 目录）"}
+  ]
+}

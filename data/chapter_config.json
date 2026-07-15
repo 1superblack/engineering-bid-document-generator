@@ -1,0 +1,55 @@
+{
+  "default_detail_level": 2,
+  "max_detail_level": 5,
+  "construction_chapters": [
+    {"title": "工程概况及施工部署", "weight": 5, "min_pages": 8},
+    {"title": "施工总进度计划及保障措施", "weight": 25, "min_pages": 20},
+    {"title": "施工总平面布置", "weight": 5, "min_pages": 8},
+    {"title": "主要分部分项工程施工方案", "weight": 30, "min_pages": 25},
+    {"title": "质量保证措施和创优计划", "weight": 15, "min_pages": 15},
+    {"title": "安全生产保证措施", "weight": 15, "min_pages": 15},
+    {"title": "文明施工与环境保护措施", "weight": 8, "min_pages": 8},
+    {"title": "季节性施工保障措施", "weight": 5, "min_pages": 6},
+    {"title": "应急预案与救援措施", "weight": 5, "min_pages": 6},
+    {"title": "劳动力及材料供应计划", "weight": 5, "min_pages": 8},
+    {"title": "施工机械设备配置", "weight": 5, "min_pages": 8},
+    {"title": "项目管理班子配备", "weight": 5, "min_pages": 6},
+    {"title": "成品保护及工程保修", "weight": 5, "min_pages": 6}
+  ],
+  "service_chapters": [
+    {"title": "项目理解与服务方案", "weight": 15, "min_pages": 12},
+    {"title": "服务团队及人员配置", "weight": 15, "min_pages": 10},
+    {"title": "服务流程与标准", "weight": 20, "min_pages": 15},
+    {"title": "质量控制与保障措施", "weight": 15, "min_pages": 12},
+    {"title": "应急响应机制", "weight": 10, "min_pages": 8},
+    {"title": "安全与保密管理", "weight": 10, "min_pages": 8},
+    {"title": "保密与合规管理", "weight": 10, "min_pages": 8}
+  ],
+  "keyword_map": {
+    "安全": ["安全", "防护", "事故", "隐患", "消防"],
+    "质量保证": ["质量", "验收", "合格", "创优", "标准"],
+    "进度": ["进度", "工期", "节点", "计划"],
+    "环保": ["环保", "节能", "减排", "绿色"],
+    "文明施工": ["文明", "场清", "围挡", "标化"]
+  },
+  "division_templates": {
+    "土建": ["土石方工程", "基础工程", "主体结构工程", "砌体工程", "屋面工程"],
+    "机电安装": ["给排水工程", "电气工程", "暖通工程", "消防工程", "智能化工程"],
+    "装饰装修": ["楼地面工程", "墙柱面工程", "吊顶工程", "细部工程", "门窗工程"],
+    "市政": ["道路工程", "管网工程", "桥梁工程", "绿化工程", "照明工程"],
+    "园林绿化": ["土方造型", "苗木种植", "园路铺装", "水景工程", "养护管理"]
+  },
+  "service_keywords": [
+    "服务", "清洗", "消毒", "维护", "巡查", "保洁", "物业管理", "养护",
+    "二次供水", "供水设施", "设施管理", "运营管理", "运维"
+  ],
+  "construction_keywords": [
+    "施工", "装饰", "装修", "安装", "改造", "新建", "土建",
+    "市政", "道路", "管网", "结构", "防水", "涂装"
+  ],
+  "render_options": {
+    "add_page_numbers": true,
+    "auto_toc": true,
+    "image_per_chapter": false
+  }
+}

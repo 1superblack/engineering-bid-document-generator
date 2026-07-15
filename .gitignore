@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.eggs/
+
+# 本地生成产物
+output/
+*.docx
+*.pptx
+
+# 环境与编辑器
+.venv/
+venv/
+.env
+.idea/
+.vscode/

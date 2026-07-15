@@ -1,0 +1,33 @@
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.git
+  | \.github
+  | __pycache__
+  | \.venv
+  | build
+  | dist
+  | data
+  | references
+  | .*\.legacy$
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["bid_core", "bid_technical", "bid_commercial", "bid_qualification"]
+known_third_party = ["docx", "pydantic", "pytest"]
+skip_glob = ["**/.legacy", "**/data/*"]
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503", "E501"]
+exclude = [".git", "__pycache__", ".venv", "build", "dist", "data", "references"]
+per-file-ignores = [
+    "__init__.py:F401",
+    "test_*.py:E402",
+]

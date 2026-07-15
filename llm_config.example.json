@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "api_key": "sk-你的密钥",
+  "base_url": "https://api.openai.com/v1",
+  "model": "gpt-4o-mini",
+  "temperature": 0.7,
+  "max_tokens": 1200,
+  "timeout": 60
+}

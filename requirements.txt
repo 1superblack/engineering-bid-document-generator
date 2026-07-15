@@ -1,0 +1,3 @@
+python-docx>=0.8.11
+# 可选：述标PPT生成（v7.6）。默认关闭；未安装时自动跳过，不阻断标书生成。
+python-pptx>=0.6.18; python_version >= "3.8"

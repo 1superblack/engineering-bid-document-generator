@@ -1,0 +1,96 @@
+{
+  "company": {
+    "name": "示例建设集团有限公司",
+    "legal_person": "张明",
+    "registered_capital": "5000万元",
+    "establish_year": 2008,
+    "address": "示例市高新区创业大道88号",
+    "qualifications": [
+      {
+        "name": "建筑工程施工总承包特级",
+        "level": "特级",
+        "cert_no": "D132000001"
+      },
+      {
+        "name": "建筑装修装饰工程专业承包一级资质",
+        "level": "一级",
+        "cert_no": "D232000002"
+      },
+      {
+        "name": "建筑幕墙工程专业承包一级资质",
+        "level": "一级",
+        "cert_no": "D232000003"
+      }
+    ]
+  },
+  "key_personnel": [
+    {
+      "role": "项目经理",
+      "name": "李建国",
+      "cert": "一级建造师（建筑工程）",
+      "cert_no": "京111000000001"
+    },
+    {
+      "role": "技术负责人",
+      "name": "王宏伟",
+      "cert": "高级工程师",
+      "cert_no": "G330000002"
+    },
+    {
+      "role": "安全员",
+      "name": "赵磊",
+      "cert": "安全员C证",
+      "cert_no": "京建安C000003"
+    },
+    {
+      "role": "质检员",
+      "name": "刘洋",
+      "cert": "质检员证",
+      "cert_no": "京质000004"
+    }
+  ],
+  "similar_projects": [
+    {
+      "name": "某商业综合体装饰装修工程",
+      "amount": "约2000万元",
+      "scale": "30000㎡",
+      "year": 2023
+    },
+    {
+      "name": "某办公楼精装修工程",
+      "amount": "约1500万元",
+      "scale": "22000㎡",
+      "year": 2022
+    },
+    {
+      "name": "某医院改扩建装饰工程",
+      "amount": "约1800万元",
+      "scale": "26000㎡",
+      "year": 2021
+    }
+  ],
+  "equipment_owned": [
+    {
+      "name": "电焊机",
+      "model": "BX3-300",
+      "count": 4
+    },
+    {
+      "name": "电锤",
+      "model": "GBH2-26",
+      "count": 6
+    },
+    {
+      "name": "空压机",
+      "model": "V-0.6/8",
+      "count": 2
+    }
+  ],
+  "products": [],
+  "images": [],
+  "templates": {},
+  "_meta": {
+    "version": "8.2",
+    "note": "v8.2 重建的企业知识库样例数据"
+  }
+}
