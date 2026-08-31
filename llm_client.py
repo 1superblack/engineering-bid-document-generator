@@ -151,7 +151,25 @@ def load_llm_config(config_path: Optional[str] = None) -> Optional["LLMClient"]:
     file_retries = int(file_cfg.get("max_retries", 4) or 4)
     file_kb = (file_cfg.get("kb_path") or "").strip()
 
-    is_enabled = env_enable or file_enable
+    # v9.4.1：Codex / OPENAI_* 探测到可用凭据时同样视为启用。
+    # 原实现仅看 env/file 的 enabled 开关，导致 data/llm_config.json 保持默认
+    # enabled=false 时，即便 ~/.codex/config.toml 已配置 DeepSeek 也永远回退模板，
+    # 与「自动探测可用凭据，无需单独填 key」的设计约定不符。
+    #
+    # v9.4.1+：显式关闭优先于自动探测。
+    # 配置文件里写死 enabled=false 属于用户明确要求离线，不应被自动探测到的
+    # codex/openai 凭据静默覆盖——否则用户既无法关闭联网，网络不通时还会卡死在
+    # ssl.read（无有效超时兜底），且与「数据全程本地处理」的产品承诺相悖。
+    # 仅在未显式给出 enabled 时才走自动探测，保留「无需填 key」的便利性。
+    _file_enabled_raw = file_cfg.get("enabled", None)
+    _env_disable = os.environ.get("BIDGEN_LLM_ENABLE", "").strip().lower() \
+        in ("0", "false", "no", "off")
+    # 环境变量优先级高于配置文件（与 backend / base_url 等的既有约定一致）：
+    # env 显式开启可压过配置文件的 false，env 显式关闭则一律离线。
+    _explicit_off = _env_disable or (_file_enabled_raw is False and not env_enable)
+    is_enabled = (not _explicit_off) and (
+        env_enable or file_enable or bool(codex_key) or bool(openai_key)
+    )
     api_key = env_key or file_key or codex_key or openai_key
     if not is_enabled or not api_key:
         return None
