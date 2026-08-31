@@ -23,9 +23,13 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install python-docx pytest
-          pip install -e .
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
 
+      # 说明：此前此处为 `pip install -e .`，但 pyproject.toml 仅有
+      # black/isort/flake8 配置、缺少 [build-system] 与 [project] 元数据，
+      # 该步骤必然失败。测试通过 sys.path 直接从仓库根目录导入，无需安装。
       - name: Run lite smoke tests
         run: |
           python -m pytest test_lite.py -v --tb=short

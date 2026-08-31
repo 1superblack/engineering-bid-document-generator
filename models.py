@@ -161,6 +161,14 @@ else:
         body_font: Optional[str] = None
         header_text: str = ''
         mode: str = 'normal'
+        # 以下 5 个字段此前只存在于 Pydantic 版，降级分支漏定义，
+        # 导致 main.py 访问 req.reference_file 时抛 AttributeError。
+        # 默认值与 Pydantic 版保持一致。
+        enable_deviation_table: bool = True
+        enable_risk_grading: bool = True
+        enable_mock_review: bool = True
+        enable_knowledge_base: bool = True
+        reference_file: Optional[str] = None
         chapter_only: bool = False
         chapter_title: Optional[str] = None
         knowledge_base_path: Optional[str] = None

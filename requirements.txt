@@ -5,3 +5,6 @@ lxml>=4.9.0
 pdfplumber>=0.10.0
 PyPDF2>=3.0.0
 matplotlib>=3.7.0   # 工程图表/甘特图；缺失时仅图表 Stage 跳过，不影响主文档
+# 入口层数据模型（models.py）。缺包时虽有 dataclass 降级实现，
+# 但该降级分支字段长期滞后于 Pydantic 版，故按必需依赖声明。
+pydantic>=2.0.0
