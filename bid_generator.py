@@ -65,13 +65,23 @@ def _cn_date(d) -> str:
 
 
 def _calc_detail_level(target_pages):
+    """按目标页数推断渲染深度档位（1 精简 ~ 5 极详）。
+
+    v9.4.1：原映射在 target_pages > 200 时一律返回 3，导致 250~400 页的
+    大篇幅标书深度不足（规划 300 页、实渲不足 50 页）。现按页数分档放开
+    到 4/5 档，与 base/renderer.py 的 1~5 档设计对齐。
+    """
     if target_pages <= 0:
         return 2
     if target_pages <= 50:
         return 1
-    if target_pages <= 200:
+    if target_pages <= 120:
         return 2
-    return 3
+    if target_pages <= 200:
+        return 3
+    if target_pages <= 300:
+        return 4
+    return 5
 
 
 def _resolve_generator(bid_section, project_info, chapters, target_pages,

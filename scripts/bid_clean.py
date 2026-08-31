@@ -43,11 +43,21 @@ def _cjk_count(text: str) -> int:
     return sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
 
 
+# v9.4.1：来自评分表结构化提取的评分项（parser.py::_extract_score_table），
+# 名称已确定取自「各评分因素细分项」列，不再适用"名称须含得分"的启发式规则。
+_TRUSTED_SCORE_SOURCES = ("parser_score_table", "llm", "score_table")
+# 商务/报价类评分因素：技术标不响应（由商务标章节覆盖）
+_COMMERCIAL_FACTORS = ("商务评审", "投标报价", "其他评审", "报价")
+
+
 def is_good_score_item(item) -> bool:
     """技术标专用评分项清洗：只保留技术评审类条目。
 
     丢弃：日期/地址/编号/评分档次碎片、评标办法类别（投标报价/技术评审）、
     形式评审与商务/资格条款（报价、保证金、资质证书、联合体等）。
+
+    v9.4.1：结构化提取的评分项（source=parser_score_table）名称取自评分表
+    专用列，天然干净，豁免"得分"关键词要求，仅校验分值有效性与类别归属。
     """
     name = (item.get("name") or item.get("title") or "").strip()
     if not name:
@@ -60,7 +70,16 @@ def is_good_score_item(item) -> bool:
         return False
     if _cjk_count(name) < 4:
         return False
-    if "得分" not in name:
+    trusted = item.get("source") in _TRUSTED_SCORE_SOURCES
+    if trusted:
+        # 结构化项：分值必须有效，且不得属于商务/报价类评分因素
+        if not (item.get("score") or 0) > 0:
+            return False
+        factor = (item.get("factor") or "").strip()
+        if any(k in factor for k in _COMMERCIAL_FACTORS) and "技术" not in factor:
+            return False
+    elif "得分" not in name:
+        # 启发式项：沿用原有硬规则，避免噪声回流
         return False
     if any(k in name for k in _COMMERCIAL_FORM_DENY):
         return False

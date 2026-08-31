@@ -158,8 +158,11 @@ def main() -> int:
     # 页数→填充预算校准：按「目标页数×650字/页」估算需补充字数，折算填充段落与
     # LLM 调用预算（LLM 段约240字/段，模板段约70字/段），避免超发导致页数失控。
     if args.target_pages >= 100:
-        req["per_chapter_fill_cap"] = max(20, min(120, args.target_pages // 7))
-        req["global_fill_cap"] = max(600, args.target_pages * 7)
+        # v9.4.1：原上限「每章 min(120, pages//7) 段、全局 pages*7 段」在 300 页目标下
+        # 仅允许约 380 段填充，而 300 页按 25 段/页约需 7000 段，导致规划 300 页、
+        # 实渲不足 50 页。现按实际排版密度推导（留 20% 余量）。
+        req["per_chapter_fill_cap"] = max(120, int(args.target_pages * 4))
+        req["global_fill_cap"] = max(600, int(args.target_pages * 30))
         req["fill_para_per_page"] = 24 if args.target_pages >= 200 else 20
         req["llm_fill_call_budget"] = max(80, min(200, args.target_pages * 2 // 3))
 

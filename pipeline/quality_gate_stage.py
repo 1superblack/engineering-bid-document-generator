@@ -59,6 +59,21 @@ class DocxQualityGateStage(Stage):
     def should_run(self, ctx: StageContext) -> bool:
         return bool(_attr(ctx.req, "enable_docx_quality_gate", True)) and bool(ctx.get("result_path"))
 
+    @staticmethod
+    def _deviation_allowed(ctx: StageContext) -> bool:
+        """读取招标文件对偏离的许可口径（默认允许，避免误伤）。"""
+        req = getattr(ctx, "req", None)
+        pr = None
+        if isinstance(req, dict):
+            pr = req.get("parse_result")
+        elif req is not None:
+            pr = getattr(req, "parse_result", None)
+        if not isinstance(pr, dict):
+            pr = ctx.get("parse_result") if hasattr(ctx, "get") else None
+        if isinstance(pr, dict) and pr.get("deviation_allowed") is False:
+            return False
+        return True
+
     def run(self, ctx: StageContext) -> None:
         result_path = ctx.get("result_path")
         if not result_path or not os.path.exists(result_path):
@@ -72,8 +87,14 @@ class DocxQualityGateStage(Stage):
                 for cell in row.cells:
                     text += "\n" + "\n".join(p.text for p in cell.paragraphs)
 
+        # v9.4.1：偏离表仅在招标文件明确「不允许偏离」时才算违规；
+        # 允许/要求提交偏离表的项目属于投标文件合法组成，不拦截。
+        deviation_allowed = self._deviation_allowed(ctx)
+
         violations: List[str] = []
         for pat, label in _FORBIDDEN_TEXT_PATTERNS:
+            if label == '偏离表' and deviation_allowed:
+                continue
             if pat.search(text):
                 violations.append(label)
 

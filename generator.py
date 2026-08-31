@@ -903,12 +903,36 @@ class TechnicalBidGenerator(BaseGenerator):
         except Exception as e:
             log.warning('施工工艺流程图生成失败（已跳过）: %s', e)
 
+    def _render_no_deviation_statement(self):
+        """v9.4.1：招标文件明确「不允许偏离」时，以响应性承诺替代偏离表。"""
+        try:
+            self.doc.add_page_break()
+            self.formatter.add_heading('投标文件响应性承诺')
+            self.formatter.body(
+                '我方郑重承诺：已完整研读招标文件全部内容，包括招标公告、投标人须知、'
+                '评标办法、合同条款及格式、发包人要求及投标文件格式等各章节，对招标文件'
+                '规定的全部实质性要求、技术标准和合同条款均予以完全响应，不存在任何保留'
+                '意见或附加条件。'
+            )
+            self.formatter.body(
+                '本投标文件各项内容与招标文件要求保持一致；如存在表述差异，一律以'
+                '招标文件要求为准，我方无条件接受并按招标文件要求执行。'
+            )
+        except Exception as exc:
+            log.warning('响应性承诺生成失败（已跳过）: %s', exc)
+
     def _render_deviation_table(self):
         """P0: 从 parse_result 自动抽取实质性/星号/废标条款并生成偏离表。
 
         作为附录紧接附表之后渲染；任何异常均降级跳过，不影响主流程。
         """
         if not self.parse_result or not self.enable_deviation_table:
+            return
+        # v9.4.1：招标文件明确「不允许偏离」时，投标文件不得出现偏离表
+        # （与"完全响应"要求相悖，且会被 docx 质量闸门拦截）。
+        if self.parse_result.get('deviation_allowed') is False:
+            log.info('招标文件明确不允许偏离，跳过偏离表')
+            self._render_no_deviation_statement()
             return
         try:
             from bid_core.deviation_checker import DeviationChecker
