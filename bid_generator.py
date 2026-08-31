@@ -18,6 +18,18 @@ log = get_logger(__name__)
 # 合法的bid_section取值
 VALID_BID_SECTIONS = ('technical', 'commercial', 'qualification')
 
+# D1-③：评审自检结论旁路（generate_bid 仅返回字符串路径，无法附带 evaluation_result；
+# 用模块级字典按输出路径透传给管线下游 Stage，供 SummaryStage 与规则闸门交叉呈现）。
+# 仅作旁路，绝不影响 generate_bid 的返回契约与既有调用方。
+_EVALUATION_RESULTS = {}
+
+
+def pop_evaluation_result(path):
+    """取出并清除某输出路径对应的评审自检结论（一次性消费，避免残留）。"""
+    if path is None:
+        return None
+    return _EVALUATION_RESULTS.pop(os.path.abspath(path), None)
+
 
 def _infer_bid_type(project_info):
     """根据project_info内容智能推断标书类型"""
@@ -229,7 +241,8 @@ def generate_bid(
         try:
             _comp = ctx.get_company()
             _bn = (_comp or {}).get('name')
-            if _bn:
+            # ADR-007: 演示占位公司名（示例/演示前缀）不落盘，回退中性"我司"
+            if _bn and not str(_bn).startswith(('示例', '演示')):
                 project_info['bidder_name'] = _bn
         except Exception:
             pass
@@ -274,18 +287,33 @@ def generate_bid(
         formatter.add_toc()
         log.info("目录页已生成")
 
-    # ── 步骤8.5: P1 以标写标 — 若提供参考标书则套用其章节结构 ──
+    # ── 步骤8.5: P1 以标写标 — 若提供参考标书则套用其章节结构（C23 强化：状态可见、内容驱动）──
     chapters_arg = chapters
     if reference_file:
         try:
             from bid_core.reference_loader import ReferenceLoader
             ref = ReferenceLoader(reference_file).load()
-            outline = ref.get_adapted_outline(project_info)
-            if outline:
-                chapters_arg = outline
-                log.info("以标写标: 套用参考标书 %s 个章节结构", len(outline))
+            guidance = ref.get_reference_guidance(project_info)
+            if guidance['status'] == 'failed':
+                log.error("以标写标: 参考标书加载失败（未套用）: %s | %s",
+                          guidance.get('error_type'), guidance.get('error'))
+                project_info['_reference_status'] = {
+                    'status': 'failed', 'error': guidance.get('error')}
+            else:
+                outline = guidance['outline']
+                if outline:
+                    chapters_arg = outline
+                    log.info("以标写标: 套用参考标书 %s 个章节结构", len(outline))
+                # C23: 把风格样本/变量映射注入生成上下文，驱动措辞与变量替换
+                project_info['reference_guidance'] = guidance
+                project_info['_reference_status'] = {
+                    'status': guidance['status'],
+                    'chapter_count': guidance['chapter_count'],
+                    'outline': outline,
+                }
         except Exception as exc:
-            log.error("参考标书加载失败，已忽略: %s", exc)
+            log.error("以标写标: 参考标书处理异常（已忽略）: %s", exc)
+            project_info['_reference_status'] = {'status': 'error', 'error': str(exc)}
 
     # ── 步骤9: 根据bid_section选择生成器 ──
     generator = _resolve_generator(
@@ -302,6 +330,13 @@ def generate_bid(
     result_path = generator.generate(output_path)
     log.info("标书内容已生成: %s", result_path)
 
+    # ── 步骤10.1: D1-③ 透传评审自检结论（EvaluatorCheck 结果在 generator 实例上）──
+    try:
+        _ev = getattr(generator, "evaluation_result", None)
+        _EVALUATION_RESULTS[os.path.abspath(result_path)] = _ev
+    except Exception:  # noqa: BLE001
+        pass
+
     # ── 步骤11: 页码 ──
     if add_page_numbers and not is_dark_bid:
         formatter.add_page_numbers()
@@ -314,7 +349,9 @@ def generate_bid(
     if enable_ppt:
         try:
             from bid_core.ppt_generator import generate_bid_ppt
-            ppt_path = generate_bid_ppt(parse_result, project_info, result_path)
+            ppt_path = generate_bid_ppt(
+                parse_result, project_info, result_path,
+            )
             log.info("述标PPT已生成: %s", ppt_path)
         except ImportError:
             log.warning("未安装 python-pptx，跳过述标PPT（pip install python-pptx 启用）")

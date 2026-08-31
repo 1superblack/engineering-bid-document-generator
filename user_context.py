@@ -185,13 +185,20 @@ class UserContext:
         return bool(self.data)
     
     def merge(self, additional_data):
-        """合并额外数据"""
+        """合并额外数据：已有值（user_context）优先，additional_data（知识库）仅补缺。
+
+        ADR-007：避免 demo 知识库（示例建设集团）覆盖用户注入的真实投标人信息。
+        """
         if isinstance(additional_data, dict):
             for key, value in additional_data.items():
                 if key in self.data and isinstance(self.data[key], dict) and isinstance(value, dict):
-                    self.data[key].update(value)
+                    # 以 self.data[key]（用户上下文）为基准，知识库仅补充缺失键
+                    merged = dict(value)
+                    merged.update(self.data[key])
+                    self.data[key] = merged
                 else:
-                    self.data[key] = value
+                    if key not in self.data:
+                        self.data[key] = value
     
     def to_dict(self):
         """转为字典"""

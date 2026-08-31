@@ -64,6 +64,15 @@ def generate_deviation_table(doc: Document,
     srun.font.size = Pt(9)
     srun.italic = True
 
+    # —— 无偏离声明（招标未列明具体偏离行时，按"完全响应、无偏离"口径填写）——
+    decl = doc.add_paragraph()
+    drun = decl.add_run(
+        '我方承诺：投标文件完全响应招标文件（含投标人须知、评标办法、合同条款、'
+        '技术标准和要求等）的全部实质性要求和条件，无任何偏离。下表仅就招标文件'
+        '明确列出的废标/否决及资格审查条款逐条确认我方均满足，未列出的条款均视为'
+        '我方完全响应、无偏离。')
+    drun.font.size = Pt(9)
+
     # —— 表格 ——
     rows = len(items) + 1
     cols = len(HEADER)

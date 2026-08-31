@@ -127,21 +127,7 @@ class DeviationChecker:
         raw: List[Dict[str, Any]] = []
         pr = self.parse_result
 
-        # 1. 星号 / 强制条款
-        for sc in pr.get('star_clauses', []) or []:
-            content = (sc.get('content') or '').strip()
-            if not content:
-                continue
-            raw.append({
-                'category': CAT_STAR,
-                'content': content,
-                'clause_number': '',
-                'severity': sc.get('severity', 'high'),
-                'is_mandatory': sc.get('type') in ('star_marked', 'mandatory'),
-                'source': 'star_clauses',
-            })
-
-        # 2. 废标条款（结构化）
+        # 1. 废标条款（结构化）—— 招标文件明确列出的否决/废标条款，逐条承诺满足
         for dc in pr.get('disqualify_clauses_structured', []) or []:
             content = (dc.get('content') or '').strip()
             if not content:
@@ -155,7 +141,7 @@ class DeviationChecker:
                 'source': 'disqualify_clauses_structured',
             })
 
-        # 3. 资格要求
+        # 2. 资格要求 —— 招标文件资格审查条件（真实强制性门槛）
         for qr in pr.get('qualification_reqs', []) or []:
             content = (qr.get('content') or '').strip()
             if not content:
@@ -169,19 +155,11 @@ class DeviationChecker:
                 'source': 'qualification_reqs',
             })
 
-        # 4. 红线条款
-        for rc in pr.get('red_line_clauses', []) or []:
-            content = (rc.get('content') or '').strip()
-            if not content:
-                continue
-            raw.append({
-                'category': CAT_REDLINE,
-                'content': content,
-                'clause_number': '',
-                'severity': 'critical',
-                'is_mandatory': True,
-                'source': 'red_line_clauses',
-            })
+        # 说明：star_clauses / red_line_clauses 不再纳入偏离表。
+        # 经验证，当前 parser 的 star_clauses 主要捕获《示范文本》投标人须知等
+        # 铺垫文字（如"第二章投标人须知..."），并非真实星号/强制条款；red_line_clauses
+        # 与 disqualify_clauses_structured 高度重叠。纳入会污染偏离表（163 行巨表），
+        # 违背"仅按招标要求填写"。故仅保留招标文件明确列出的废标/资格条款。
 
         # 去重（基于内容前 30 字归一化）
         seen = set()
@@ -328,19 +306,23 @@ class DeviationChecker:
         if not text:
             return None, ''
         # 优先匹配 亿元 / 万元 / 万 / 平方米 / ㎡ / 个 / 人 / 名 / 年
+        # 数值捕获限定为「单可选小数点」小数，避免把条款号（如 1.4.4）误当数值导致 float 崩溃
         pats = [
-            (r'([\d.]+)\s*亿元', '亿元'),
-            (r'([\d.]+)\s*万元', '万元'),
-            (r'([\d.]+)\s*万', '万'),
-            (r'([\d.]+)\s*(平方米|㎡|m2|M2)', '㎡'),
-            (r'([\d.]+)\s*(个|项)', '个'),
-            (r'([\d.]+)\s*(人|名)', '人'),
-            (r'([\d.]+)\s*年', '年'),
+            (r'(\d+(?:\.\d+)?)\s*亿元', '亿元'),
+            (r'(\d+(?:\.\d+)?)\s*万元', '万元'),
+            (r'(\d+(?:\.\d+)?)\s*万', '万'),
+            (r'(\d+(?:\.\d+)?)\s*(平方米|㎡|m2|M2)', '㎡'),
+            (r'(\d+(?:\.\d+)?)\s*(个|项)', '个'),
+            (r'(\d+(?:\.\d+)?)\s*(人|名)', '人'),
+            (r'(\d+(?:\.\d+)?)\s*年', '年'),
         ]
         for pat, unit in pats:
             m = re.search(pat, text)
             if m:
-                val = float(m.group(1))
+                try:
+                    val = float(m.group(1))
+                except ValueError:
+                    continue  # 捕获到非数值（如条款号 1.4.4）→ 跳过本模式，尝试下一项
                 if unit == '亿元':
                     val *= 10000  # 统一为万元
                 return val, unit

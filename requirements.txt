@@ -1,3 +1,7 @@
+# 工程标书生成器 - 运行时依赖
 python-docx>=0.8.11
-# 可选：述标PPT生成（v7.6）。默认关闭；未安装时自动跳过，不阻断标书生成。
-python-pptx>=0.6.18; python_version >= "3.8"
+python-pptx>=0.6.18
+lxml>=4.9.0
+pdfplumber>=0.10.0
+PyPDF2>=3.0.0
+matplotlib>=3.7.0   # 工程图表/甘特图；缺失时仅图表 Stage 跳过，不影响主文档

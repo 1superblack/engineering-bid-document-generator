@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+import json
 from typing import Any, Dict, List, Optional
 
 # ── 正则 ─────────────────────────────────────────────────────────
@@ -60,9 +61,21 @@ _RE_PARAM = re.compile(
     r'(\d+(?:\.\d+)?)\s*([a-zA-Zμ℃%°km/]*)[^，。；;]{0,18}'
 )
 _RE_DATE = re.compile(r'(\d{4})\s*[-年./]\s*(\d{1,2})\s*[-月./]\s*(\d{1,2})')
+# v8.10: 形式要件抽取（签字/盖章/密封/装订/正副本/电子版/授权）
+# 这些是最高频的「隐性废标」诱因，且通常不写入废标条款正文，须单独抽取。
+_FORMAT_CATS = [
+    ('seal', re.compile(r'(盖章|公章|鲜章|骑缝章|印章)')),
+    ('signature', re.compile(r'(签字|签章|签署)')),
+    ('binding', re.compile(r'(装订|胶装|线装|装订成册|合订)')),
+    ('copy', re.compile(r'(正本|副本)')),
+    ('electronic', re.compile(r'(电子版|电子文档|U盘|光盘|CA锁|电子标|电子光盘)')),
+    ('sealed', re.compile(r'(密封|封套|包封|外层包封)')),
+    ('legal_rep', re.compile(r'(法定代表人|授权委托书|授权书|授权代表|被授权人)')),
+]
 
 
-def parse_tender(path, bid_type: str = 'construction') -> Dict[str, Any]:
+def parse_tender(path, bid_type: str = 'construction',
+                 llm_client: Any = None, enable_llm_parse: bool = False) -> Dict[str, Any]:
     """解析招标文件，返回 parse_result 字典。
 
     Args:
@@ -104,7 +117,96 @@ def parse_tender(path, bid_type: str = 'construction') -> Dict[str, Any]:
     except Exception as exc:  # 解析本身失败，返回空结构
         return _empty(f'解析失败: {exc}')
 
-    return _analyze(blocks, bid_type)
+    result = _analyze(blocks, bid_type)
+
+    # T1：LLM 结构化抽取主路径（双路合并 + 置信度告警）
+    # 仅单文件主路径启用；多文件合并路径用正则 merged 即可。
+    if enable_llm_parse and llm_client:
+        llm_res = _llm_extract(blocks, llm_client, bid_type)
+        if llm_res:
+            result = _merge_parse(result, llm_res)
+            result['llm_enriched'] = True
+            result['parse_confidence'] = _parse_confidence(result, llm_res)
+        else:
+            _w = result.get('_warn')
+            result['_warn'] = (_w + '；' if _w else '') + 'LLM解析未返回有效结构，已回退正则'
+    return result
+
+
+# ── T1 LLM 双路抽取 ─────────────────────────────────────────────
+_LLM_FIELDS = (
+    'score_items', 'star_clauses', 'qualification_reqs', 'red_line_clauses',
+    'disqualify_clauses_structured', 'quantities', 'deadlines', 'key_params',
+    'format_requirements',
+)
+
+
+def _llm_extract(blocks: List[str], llm_client: Any, bid_type: str) -> Dict[str, Any]:
+    """用 LLM 做结构化抽取主路径，返回与 parse_result 兼容的字典（可能为空）。
+
+    失败/未启用返回空字典，由正则路径兜底。绝不抛异常。
+    """
+    if not llm_client:
+        return {}
+    text = '\n'.join(blocks)[:12000]  # 截断避免超长上下文
+    system = (
+        "你是资深招标文件解析专家。从给定文本中抽取结构化招标要素，"
+        "只返回 JSON，不要任何解释。字段与示例结构："
+        "score_items(评分项, 元素含 name/score)、"
+        "star_clauses(星号/必须条款, 含 content/severity)、"
+        "qualification_reqs(资格审查, 含 field/label/content)、"
+        "red_line_clauses(废标/无效标条款, 含 content)、"
+        "disqualify_clauses_structured(含 content/clause_number/severity)、"
+        "quantities(含 value/unit/text)、deadlines(含 kind/date)、"
+        "key_params(含 item/value/unit/text)、"
+        "format_requirements(含 type/text)。"
+        "无法识别的字段给空数组 []。"
+    )
+    user = f"招标文件文本：\n{text}\n\n请按上述结构返回 JSON。"
+    try:
+        raw = llm_client.chat(system, user)
+        if not raw:
+            return {}
+        s = raw[raw.find('{'):raw.rfind('}') + 1]
+        data = json.loads(s)
+        if not isinstance(data, dict):
+            return {}
+        out: Dict[str, Any] = {}
+        for f in _LLM_FIELDS:
+            v = data.get(f)
+            out[f] = v if isinstance(v, list) else []
+        return out
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _merge_parse(base: Dict[str, Any], llm_res: Dict[str, Any]) -> Dict[str, Any]:
+    """正则结果为主，LLM 抽取结果补充正则漏抽的条款（按签名去重）。"""
+    for f in _LLM_FIELDS:
+        a = base.get(f) or []
+        b = llm_res.get(f) or []
+        if not b:
+            continue
+        seen = {_sig(x) for x in a}
+        for x in b:
+            sg = _sig(x)
+            if sg not in seen:
+                a.append(x)
+                seen.add(sg)
+        base[f] = a
+    return base
+
+
+def _parse_confidence(base: Dict[str, Any], llm_res: Dict[str, Any]) -> Dict[str, Any]:
+    """T1 置信度：正则与 LLM 抽取的条目量对比（用于未识别条款显式告警）。"""
+    regex_total = sum(len(base.get(f) or []) for f in _LLM_FIELDS)
+    llm_total = sum(len(llm_res.get(f) or []) for f in _LLM_FIELDS)
+    return {
+        'regex_items': regex_total,
+        'llm_items': llm_total,
+        'added_by_llm': max(0, llm_total - regex_total),
+        'enrich_ratio': round(llm_total / (regex_total + llm_total + 1e-9), 3),
+    }
 
 
 def _merge_result(base: Optional[Dict[str, Any]], other: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,24 +264,111 @@ def _extract_docx(path: str) -> List[str]:
 
 
 def _extract_pdf(path: str) -> List[str]:
-    import pdfplumber
-    blocks: List[str] = []
-    with pdfplumber.open(path) as pdf:
-        for page in pdf.pages:
+    """提取 PDF 文本块。优先 pdfplumber（版面感知更佳）；缺失时回退 PyPDF2（已内置），
+    保证真实 PDF 招标文件在任意环境下均可解析为 parse_result。"""
+    try:
+        import pdfplumber  # type: ignore
+        blocks: List[str] = []
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                txt = page.extract_text() or ''
+                for line in txt.splitlines():
+                    line = line.strip()
+                    if line:
+                        blocks.append(line)
+                for tbl in (page.extract_tables() or []):
+                    for row in tbl:
+                        cells = [str(c).strip() for c in row if c and str(c).strip()]
+                        if cells:
+                            blocks.append(' | '.join(cells))
+        return blocks
+    except ImportError:
+        # 回退：PyPDF2（venv 已预置），无表格结构、仅纯文本，足够启发式抽取
+        from PyPDF2 import PdfReader
+        blocks = []
+        reader = PdfReader(path)
+        for page in reader.pages:
             txt = page.extract_text() or ''
             for line in txt.splitlines():
                 line = line.strip()
                 if line:
                     blocks.append(line)
-            for tbl in (page.extract_tables() or []):
-                for row in tbl:
-                    cells = [str(c).strip() for c in row if c and str(c).strip()]
-                    if cells:
-                        blocks.append(' | '.join(cells))
-    return blocks
+        return blocks
 
 
 # ── 分析 ─────────────────────────────────────────────────────────
+def _collect_technical_chapters(blocks: List[str]) -> List[Dict[str, Any]]:
+    """ADR-009 修复：从招标文件「技术评审」评分表抽取技术标一级章。
+
+    该表为 条款号|评分因素|各评分因素细分项|分值|评分标准，
+    细分项列形如「1.施工总进度计划及保障措施得分」，且常因列宽换行
+    被拆成多行（如「3.主要分项工程施工方案和技术措⏎施得分」）或跨单元格拆行。
+
+    做法：
+    1. 定位含「技术评审」的表格区（分值构成块或评分因素=技术评审行）进入采集；
+       遇到 2.2.3 / 负偏离 / 废标 / 否决投标 等明确结束标记即退出，避免把
+       后续「负偏离」章节里的「1、投标文件技术部分的优点」误当章名；
+    2. 仅采集「细分项」单元格（以「N.中文」开头 或 含「得分」且非评分区间文本），
+       **抹平单元格内换行 \\n** 桥接拆行（关键修复：此前带 \\n 的章名无法被
+       「数字.中文+得分」锚定正则匹配，导致 13 项只抽到 1 项）；
+    3. 用「数字.中文+得分」锚定正则重建完整章名（已剥离前缀序号与后缀「得分」），
+       排除「优秀为N分」等评分区间文本污染；返回 name 可直接作一级章标题。
+    """
+    collected: List[str] = []
+    inside = False
+    # 评分表结束标记：进入负偏离/否决/废标章节即退出采集区
+    _STOP = ('2.2.3', '负偏离', '否决投标', '废标', '无效投标')
+    for b in blocks:
+        # 非表格块仅做状态切换（采集区起止），不采集内容
+        if ' | ' not in b:
+            if ('技术评审' in b) and ('评分因素' in b or '各评分因素细分项' in b):
+                inside = True
+            if inside and any(s in b for s in _STOP):
+                inside = False
+            continue
+
+        # 抹平单元格内换行（关键修复）
+        cells = [c.replace('\n', '').strip() for c in b.split(' | ')]
+        has_tech = any('技术评审' in c for c in cells)
+        if not inside:
+            if has_tech:
+                inside = True
+            else:
+                continue
+        # 评分因素切到非技术评审（商务/响应性/形式）→ 退出
+        factor = [c for c in cells if c and any(k in c for k in
+                  ('技术评审', '商务评审', '响应性评审', '形式评审'))]
+        if factor and '技术评审' not in ''.join(factor):
+            inside = False
+            continue
+        # 明确结束标记 → 退出（兜底）
+        if any(s in b for s in _STOP):
+            inside = False
+            continue
+        # 关键修复：把整行（抹平换行、拼接所有单元格）作为候选文本收集，
+        # 而非逐单元格匹配——长章名常被 pdfplumber 拆成多单元格
+        # （如「4.对总承包…专业」|「分包…服」|「务方案得分」），
+        # 逐单元格无法拼出「数字.中文+得分」锚点，导致残章漏抽。
+        # 拼行后由末尾正则统一桥接跨单元格/跨行残章。
+        row_text = ''.join(cells)
+        if '得分' in row_text or re.match(r'^\s*\d+[.、．]', row_text):
+            collected.append(row_text)
+    text = ''.join(collected)
+    items: List[Dict[str, Any]] = []
+    seen = set()
+    # 章名内部常含顿号「、」/间隔号「·」/一字线「—」（如「配合、协调、管理、服务方案」），
+    # 必须纳入名称字符类，否则惰性匹配遇「、」即断、够不到末尾「得分」→ 整项漏抽。
+    for m in re.finditer(r'(?:\d{1,3}[.、．]\s*)([\u4e00-\u9fff、·—]{2,80}?)得分', text):
+        name = m.group(1).strip()
+        if len(name) < 4 or name in seen:
+            continue
+        seen.add(name)
+        # score 给 0（技术评审表的「分值」列未在抽取中捕获；
+        # 数值 0 而非 None，避免下游 scoring_strategy 的 max(weight,100) 因 None 崩溃）
+        items.append({'name': name, 'score': 0, 'source': 'technical_chapters'})
+    return items
+
+
 def _analyze(blocks: List[str], bid_type: str) -> Dict[str, Any]:
     score_items: List[Dict[str, Any]] = []
     star_clauses: List[Dict[str, Any]] = []
@@ -189,6 +378,7 @@ def _analyze(blocks: List[str], bid_type: str) -> Dict[str, Any]:
     quantities: List[Dict[str, Any]] = []
     deadlines: List[Dict[str, Any]] = []
     key_params: List[Dict[str, Any]] = []
+    format_requirements: List[Dict[str, Any]] = []
 
     seen_score = set()
     seen_star = set()
@@ -196,6 +386,7 @@ def _analyze(blocks: List[str], bid_type: str) -> Dict[str, Any]:
     seen_qty = set()
     seen_ddl = set()
     seen_param = set()
+    seen_fmt = set()
 
     for block in blocks:
         _collect_scores(block, score_items, seen_score)
@@ -205,9 +396,11 @@ def _analyze(blocks: List[str], bid_type: str) -> Dict[str, Any]:
         _collect_quantities(block, quantities, seen_qty)
         _collect_deadlines(block, deadlines, seen_ddl)
         _collect_params(block, key_params, seen_param)
+        _collect_format(block, format_requirements, seen_fmt)
 
     return {
         'score_items': score_items,
+        'technical_chapters': _collect_technical_chapters(blocks),
         'star_clauses': star_clauses,
         'qualification_reqs': qualification_reqs,
         'red_line_clauses': red_line_clauses,
@@ -216,6 +409,8 @@ def _analyze(blocks: List[str], bid_type: str) -> Dict[str, Any]:
         'quantities': quantities,
         'deadlines': deadlines,
         'key_params': key_params,
+        # v8.10: 形式要件（签字/盖章/密封/装订/正副本/电子版/授权）
+        'format_requirements': format_requirements,
         'raw_block_count': len(blocks),
     }
 
@@ -328,6 +523,27 @@ def _collect_disqualify(block: str, red_out: List[Dict[str, Any]], struct_out: L
     })
 
 
+def _collect_format(block: str, out: List[Dict[str, Any]], seen: set) -> None:
+    """v8.10: 抽取形式要件（签字/盖章/密封/装订/正副本/电子版/授权）。
+
+    这些要件常以散句出现在「投标文件格式」「装订装订要求」章节，
+    而非废标条款正文，漏做即隐性废标。按类别抽取并去重。
+    """
+    text = block.strip()
+    for cat, rgx in _FORMAT_CATS:
+        if not rgx.search(text):
+            continue
+        key = f'{cat}:{text[:20]}'
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            'type': cat,
+            'text': text[:160],
+            'source': 'parser',
+        })
+
+
 def _collect_quantities(block: str, out: List[Dict[str, Any]], seen: set) -> None:
     """v7.3: 抽取工程量清单中的数量（面积/体积/长度/重量/台套等）。"""
     for m in _RE_QUANTITY.finditer(block):
@@ -385,5 +601,6 @@ def _empty(reason: str) -> Dict[str, Any]:
         'quantities': [],
         'deadlines': [],
         'key_params': [],
+        'format_requirements': [],
         '_error': reason,
     }

@@ -7,6 +7,7 @@ v4.0: detail_level 深度控制和 parse_result 评分项对齐
 """
 
 import json
+import os
 from typing import Any, Dict, Union
 
 from bid_core.models import BidRequest, dict_to_request, request_to_dict
@@ -53,6 +54,21 @@ def generate_bid_document(args: Union[Dict[str, Any], BidRequest]) -> Dict[str, 
         # 未配置时返回 None，RichChapter 自动回退模板，行为与 v7.1 一致。
         llm_client = load_llm_config()
 
+        # T2 双选项隐私方案：云端后端出网前挂载实体脱敏 Masker；
+        # 商务标（报价/造价）即便选云端也严禁出网，强制回退本地模板。
+        if llm_client is not None and getattr(llm_client.config, "backend", "local") == "cloud":
+            if req.bid_section == "commercial" or req.bid_type not in ("construction", "service"):
+                _log.warning("云端后端命中商务标/非常规类型，存在报价等强隐私字段，"
+                             "已拒绝出网并回退模板生成（数据不出本机）。")
+                llm_client = None
+            else:
+                try:
+                    from llm_mask import build_masker_from_request
+                    llm_client.masker = build_masker_from_request(req)
+                except Exception as exc:  # noqa: BLE001
+                    _log.warning("脱敏 Masker 装配失败，已回退模板生成: %s", exc)
+                    llm_client = None
+
         from bid_generator import (
             generate_bid, generate_bid_with_hooks,
         )
@@ -82,6 +98,21 @@ def generate_bid_document(args: Union[Dict[str, Any], BidRequest]) -> Dict[str, 
             except Exception as exc:
                 _log.warning('招标文件解析失败，已忽略: %s | %s', req.tender_file, exc)
         parse_result = req.parse_result
+
+        # v8.9: 投标可行性预评估（解析后、生成前；纯规则引擎，失败不阻断生成）
+        feasibility_report = None
+        if req.enable_feasibility and parse_result:
+            try:
+                from bid_feasibility import assess_bid_feasibility
+                feas_info = req.user_context or {}
+                feas = assess_bid_feasibility(parse_result, enterprise_info=feas_info)
+                feasibility_report = feas.to_dict()
+                _log.info('可行性预评估完成: 建议=%s 综合分=%.0f 资质匹配=%.0f 风险=%s',
+                          feas.recommendation, feas.overall_score,
+                          feas.qualification_match, feas.risk_level)
+            except Exception as exc:
+                _log.warning('可行性评估失败，已跳过: %s | %s', type(exc).__name__, exc)
+
         is_dark_bid = req.is_dark_bid
         dark_bid_filter_words = req.dark_bid_filter_words
         reference_file = req.reference_file
@@ -89,6 +120,7 @@ def generate_bid_document(args: Union[Dict[str, Any], BidRequest]) -> Dict[str, 
         enable_mock_review = req.enable_mock_review
         enable_knowledge_base = req.enable_knowledge_base
         knowledge_base_path = req.knowledge_base_path
+        enable_scoring_reinforce = req.enable_scoring_reinforce
 
         # P1: 单章节生成模式（chapter_only + chapter_title）
         if req.chapter_only and req.chapter_title:
@@ -167,6 +199,52 @@ def generate_bid_document(args: Union[Dict[str, Any], BidRequest]) -> Dict[str, 
 
         _log.info('标书生成完成: %s', result_path)
 
+        # v8.9: 跨文档防串标查重（可选；提供历史标书后与本成果比对，失败不阻断生成）
+        cross_doc_similarity = None
+        cross_doc_risk = None
+        if req.previous_bids and result_path and os.path.exists(result_path):
+            try:
+                from bid_generator import check_duplicates
+                report = check_duplicates([result_path] + list(req.previous_bids), mode='标书')
+                cross_doc_similarity = report.get('overall_max_similarity')
+                cross_doc_risk = report.get('risk_level')
+                _log.info('跨文档查重完成: 最大相似度=%.1f%% 风险=%s',
+                          cross_doc_similarity or 0.0, cross_doc_risk)
+            except Exception as exc:
+                _log.warning('跨文档查重失败，已跳过: %s | %s', type(exc).__name__, exc)
+
+        # v8.10: 废标风险库核验（可选；基于招标文件形式要件 + 内置55条风险模式，比对生成稿）
+        risk_library_findings = None
+        if enable_risk_grading and result_path and os.path.exists(result_path):
+            try:
+                from checker.risk_library import check_risk_library, _extract_doc_text
+                doc_text = _extract_doc_text(result_path)
+                rl = check_risk_library(parse_result, doc_text)
+                risk_library_findings = rl
+                _log.info('废标风险库核验完成: 高=%d 中=%d 低=%d',
+                          rl['high'], rl['medium'], rl['low'])
+            except Exception as exc:
+                _log.warning('废标风险库核验失败，已跳过: %s | %s', type(exc).__name__, exc)
+
+        # v9.0（ADR-005 已移除）: 企业资质业绩库 → 资质业绩响应表
+        qualification_response_table = None
+
+        # v9.2: 评分响应闭环补强（PDCA-Act）— 诊断成稿评分项覆盖，自动补强弱/未覆盖项
+        scoring_reinforcement = None
+        if enable_scoring_reinforce and parse_result and result_path and os.path.exists(result_path):
+            try:
+                from scoring_reinforce import run_scoring_reinforcement
+                r = run_scoring_reinforcement(parse_result, result_path)
+                scoring_reinforcement = r
+                if r.get('injected'):
+                    _log.info('评分响应闭环补强: 注入 %d 段（弱=%d 未覆盖=%d 已覆盖=%d 总=%d）',
+                              r['injected'], r['weak'], r['uncovered'], r['covered'], r['total'])
+                else:
+                    _log.info('评分响应闭环补强: 评分项已全覆盖，无需补强（总=%d 已覆盖=%d）',
+                              r['total'], r['covered'])
+            except Exception as exc:
+                _log.warning('评分响应闭环补强失败，已跳过: %s | %s', type(exc).__name__, exc)
+
         return {
             "success": True,
             "message": "标书生成成功",
@@ -177,6 +255,12 @@ def generate_bid_document(args: Union[Dict[str, Any], BidRequest]) -> Dict[str, 
             "detail_level": detail_level or (3 if target_pages > 120 else 2 if target_pages > 50 else 1),
             "is_dark_bid": is_dark_bid,
             "hooks_applied": hooks_result is not None,
+            "feasibility_report": feasibility_report,
+            "cross_doc_similarity": cross_doc_similarity,
+            "cross_doc_risk": cross_doc_risk,
+            "risk_library_findings": risk_library_findings,
+            "qualification_response_table": qualification_response_table,
+            "scoring_reinforcement": scoring_reinforcement,
         }
     except Exception as e:
         _log.error('标书生成失败: %s', e, exc_info=True)

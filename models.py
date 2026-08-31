@@ -87,11 +87,15 @@ if _HAS_PYDANTIC:
         enable_risk_grading: bool = Field(True, description='P2: 三级废标风险分级预警')
         enable_mock_review: bool = Field(True, description='P2: 模拟评审打分与得分表')
         enable_knowledge_base: bool = Field(True, description='P3: 启用企业知识库复用')
+        enable_feasibility: bool = Field(True, description='v8.9: 投标前可行性预评估(资质匹配/废标风险/时间压力)')
         reference_file: Optional[str] = Field(None, description='P1: 以标写标-参考历史标书路径(docx)')
         chapter_only: bool = Field(False, description='P1: 仅生成单章节(配合 chapter_title)')
         chapter_title: Optional[str] = Field(None, description='P1: 单章节标题(配合 chapter_only)')
         knowledge_base_path: Optional[str] = Field(None, description='P3: 知识库 JSON 路径(默认 data/user_knowledge_base.json)')
         tender_file: Optional[str] = Field(None, description='v7.1: 招标文件路径(docx/pdf)，自动解析为 parse_result')
+        previous_bids: Optional[List[str]] = Field(None, description='v8.9: 历史标书路径列表,用于跨文档防串标查重')
+        enable_qualification_response: bool = Field(True, description='v9.0: 企业资质业绩库+资质业绩响应表注入成稿')
+        enable_scoring_reinforce: bool = Field(False, description='v9.2: 评分响应闭环补强(PDCA-Act)，默认关闭，避免正文尾部堆积评分项描述')
 
         @field_validator('bid_type')
         @classmethod
@@ -161,6 +165,10 @@ else:
         chapter_title: Optional[str] = None
         knowledge_base_path: Optional[str] = None
         tender_file: Optional[str] = None
+        enable_feasibility: bool = True
+        previous_bids: Optional[List[str]] = None
+        enable_qualification_response: bool = True
+        enable_scoring_reinforce: bool = False
 
         def model_dump(self) -> Dict[str, Any]:
             """兼容 Pydantic 的 model_dump 接口"""

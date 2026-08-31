@@ -32,7 +32,7 @@ class PageSetupMixin:
         """初始化样式。"""
         s = self.doc.styles['Normal']
         s.font.name = self.body_font
-        s.font.size = Pt(16)
+        s.font.size = Pt(12)
         s.font.color.rgb = RGBColor(0, 0, 0)
         s._element.rPr.rFonts.set(qn('w:eastAsia'), self.body_font)
         pf = s.paragraph_format

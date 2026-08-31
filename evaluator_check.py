@@ -327,8 +327,17 @@ class EvaluatorCheck:
 
         # 1. 标题精确匹配
         heading_texts = [h['text'] for h in self.bid_doc_headings]
+
+        def _norm(s: str) -> str:
+            s = re.sub(r"^\s*\d+(\.\d+)*[\.、]?\s*", "", s)
+            s = re.sub(r"得分\s*$", "", s)
+            s = re.sub(r"（满分[^）]*）", "", s)
+            return re.sub(r"\s+", "", s)
+
+        nt = _norm(item_title)
         for ht in heading_texts:
-            if item_title in ht or ht in item_title:
+            nh = _norm(ht)
+            if item_title in ht or ht in item_title or (nt and (nt in nh or nh in nt)):
                 return MATCH_STRENGTH['exact']
 
         # 2. 关键词匹配（提取2-6字关键词，排除通用词）

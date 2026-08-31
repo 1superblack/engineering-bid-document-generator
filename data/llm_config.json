@@ -1,0 +1,14 @@
+{
+  "enabled": false,
+  "backend": "cloud",
+  "api_key": "",
+  "base_url": "",
+  "model": "",
+  "temperature": 0.7,
+  "max_tokens": 1200,
+  "timeout": 60,
+  "mask": true,
+  "rpm": 20,
+  "thinking": false,
+  "max_retries": 4
+}

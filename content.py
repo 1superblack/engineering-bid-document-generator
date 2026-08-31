@@ -4,6 +4,7 @@
 """
 from docx.shared import Cm, Pt, RGBColor
 from docx.oxml.ns import qn
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
 # 中文数字映射
@@ -37,6 +38,7 @@ class ContentMixin:
         r._element.rPr.rFonts.set(qn('w:eastAsia'), self.heading_font)
         h.paragraph_format.space_before = Pt(12)
         h.paragraph_format.space_after = Pt(6)
+        h.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     def h2(self, title: str) -> None:
         """二级标题：（一）（二）（三）— v7.0 可配置插入分页符。"""
@@ -53,6 +55,7 @@ class ContentMixin:
         r._element.rPr.rFonts.set(qn('w:eastAsia'), self.heading_font)
         h.paragraph_format.space_before = Pt(8)
         h.paragraph_format.space_after = Pt(4)
+        h.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     def h3(self, title: str) -> None:
         """三级标题：1、2、3 或 1.1 1.2。"""
@@ -66,6 +69,7 @@ class ContentMixin:
         r._element.rPr.rFonts.set(qn('w:eastAsia'), self.heading_font)
         h.paragraph_format.space_before = Pt(6)
         h.paragraph_format.space_after = Pt(3)
+        h.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     def h4(self, title: str) -> None:
         """四级标题：① ② ③ 或（1）（2）（3）。"""
@@ -79,6 +83,7 @@ class ContentMixin:
         r._element.rPr.rFonts.set(qn('w:eastAsia'), self.heading_font)
         h.paragraph_format.space_before = Pt(4)
         h.paragraph_format.space_after = Pt(2)
+        h.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     def body(self, *args) -> None:
         """正文段落（支持可变参数自动拼接）v6.0。"""
@@ -86,13 +91,14 @@ class ContentMixin:
         p = self.doc.add_paragraph()
         r = p.add_run(text)
         r.font.name = self.body_font
-        r.font.size = Pt(16)
+        r.font.size = Pt(12)
         r.font.color.rgb = RGBColor(0, 0, 0)
         r._element.rPr.rFonts.set(qn('w:eastAsia'), self.body_font)
         p.paragraph_format.first_line_indent = Cm(0.85)
         p.paragraph_format.line_spacing = Pt(28)
         p.paragraph_format.space_before = Pt(0)
         p.paragraph_format.space_after = Pt(2)
+        p.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     def body_list(self, items: list) -> None:
         """正文章节列表 — 每项输出为带序号正文段落 v6.0。"""
@@ -104,7 +110,7 @@ class ContentMixin:
         p = self.doc.add_paragraph()
         r = p.add_run(text)
         r.font.name = self.body_font
-        r.font.size = Pt(16)
+        r.font.size = Pt(12)
         r.font.bold = True
         r.font.color.rgb = RGBColor(0, 0, 0)
         r._element.rPr.rFonts.set(qn('w:eastAsia'), self.body_font)
@@ -112,6 +118,7 @@ class ContentMixin:
         p.paragraph_format.line_spacing = Pt(28)
         p.paragraph_format.space_before = Pt(0)
         p.paragraph_format.space_after = Pt(2)
+        p.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     def add_heading(self, text: str) -> None:
         """添加附表标题。"""
@@ -125,6 +132,7 @@ class ContentMixin:
         r._element.rPr.rFonts.set(qn('w:eastAsia'), self.heading_font)
         h.paragraph_format.space_before = Pt(12)
         h.paragraph_format.space_after = Pt(6)
+        h.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     def image(self, path: str, caption: str = None, width_cm: float = None) -> None:
         """插入图片（居中），可选图注。文件缺失/损坏时静默跳过，绝不中断生成。

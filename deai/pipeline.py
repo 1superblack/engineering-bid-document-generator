@@ -3,7 +3,10 @@
 主编排逻辑，协调检测、修复和领域调整
 """
 import logging
+from pathlib import Path
 from typing import Tuple, Dict, List
+
+from pipeline.output_paths import aux_dir
 
 from .replacements import AI_PHRASE_REPLACEMENTS, ENGINEERING_PHRASES
 from .detectors import DeAIDetector
@@ -202,8 +205,8 @@ class DeAIProcessor:
                     para.text = processed_text
                     processed_count += 1
 
-        # 保存输出文件
-        save_path = output_path or docx_path.replace('.docx', '_deai.docx')
+        # 保存输出文件（ADR-008：归入 <主文档名>_交付物 子文件夹，桌面只留主 docx）
+        save_path = output_path or str(aux_dir(docx_path) / (Path(docx_path).stem + '_deai.docx'))
         doc.save(save_path)
 
         result = {

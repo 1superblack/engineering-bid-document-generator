@@ -82,6 +82,8 @@ class RichChapter:
         title = project_info.get('current_chapter_title') or project_info.get('chapter_title') or \
                 (self.plan_info or {}).get('title') or '本章内容'
         self._chapter_title = title  # v7.16: 供 tech10/season 注入按章节级相关性判定
+        # v7.41: 加分项/扣分点等「评审自检」式标题默认不写入正文，仅当显式开启才输出
+        self._enable_bonus = bool(project_info.get('enable_bonus_omissions', False))
         if add_title:
             self.formatter.h1(1, title)
 
@@ -116,12 +118,12 @@ class RichChapter:
 
         # 3) 加分项策划
         bonus = entry.get('bonus') or []
-        if bonus and self.detail_level >= 2:
+        if bonus and self.detail_level >= 2 and self._enable_bonus:
             self._render_bonus(bonus, ctx)
 
         # 4) 常见扣分规避
         omissions = entry.get('common_omissions') or []
-        if omissions and self.detail_level >= 3:
+        if omissions and self.detail_level >= 3 and self._enable_bonus:
             self._render_omissions(omissions, ctx)
 
     # ────────────────────────────────────────────────────────────
@@ -162,21 +164,13 @@ class RichChapter:
         return best
 
     def _emit_score_responses(self, title: str, ctx: Dict[str, Any]) -> None:
-        """针对本章相关的技术评分项，逐条输出显式响应段，便于评标人对应得分点。"""
-        items = self._relevant_score_items(title)
-        if not items:
-            return
-        comp = '我司' if getattr(self, '_dark_bid', False) else ctx.get('company_name', '我司')
-        seed = self._hash_mod('score|' + title, 100000)
-        for i, it in enumerate(items[:3]):
-            name = (it.get('name') or it.get('title') or '').strip()
-            score = it.get('score') or it.get('weight') or 0
-            rng = (seed + i * 37) % 100000
-            ev = self._evidence_sentence(ctx, rng) if (rng % 2 == 0) else ''
-            tail = ('；' + ev) if ev else ''
-            sent = (f"针对「{name}」（{score}分）评分项，{comp}从组织保障、技术措施与资源配置三方面"
-                    f"专项落实，明确控制标准与验收节点，确保该评分点应得尽得{tail}")
-            self.formatter.body(sent)
+        """针对本章相关的技术评分项，逐条输出显式响应段，便于评标人对应得分点。
+
+        v7.4: 默认关闭此功能。用户反馈正文多次出现“针对「XX」（X分）评分项”
+        既造成符号泛滥，也把评分项长文本带入正文产生异常间距，故不再注入。
+        评分项闭环由评分项响应保障表（附录）统一承载。
+        """
+        return
 
     # ────────────────────────────────────────────────────────────
     # 结构层渲染
@@ -234,15 +228,8 @@ class RichChapter:
         """未匹配到评分策略条目时的通用但项目定制的渲染。"""
         self.formatter.h2('实施方案概述')
         self._emit_block(title, [title], ctx, 'gen' + title, min(self.detail_level + 1, 4))
-        # 尝试从 parse_result 的 star/red_line 抽取针对性承诺
-        star = self.parse_result.get('star_clauses') or []
-        if star:
-            self.formatter.h2('实质性要求响应')
-            for s in star[:self.detail_level]:
-                content = s.get('content') if isinstance(s, dict) else str(s)
-                if content:
-                    self.formatter.body_bold(f'【必须响应】{content}')
-                    self._emit_block('响应' + content, ['响应' + content], ctx, 'st' + content, 1)
+        # v7.41: 实质性要求/星标条款不再逐条写入正文，避免正文变成「必须响应」测试列表；
+        # 相关内容由 risk_report / risk_library Stage 在交付物中统一呈现。
 
     # ────────────────────────────────────────────────────────────
     # 段落生成核心（模板 + 数据注入）
@@ -270,8 +257,10 @@ class RichChapter:
             paras = [p.strip() for p in re.split(r'\n\s*\n', llm_text) if p.strip()]
         else:
             paras = self._paragraphs_text(block_title, ctx, fallback_count, fallback_seed)
-        for para in paras:
-            rotated = self.differentiator.rotate(para)
+        for _i, para in enumerate(paras):
+            # P0-②：逐段加盐（章节标题+段落序号），使同一模板套话在不同出现处发散，降低逐字重复
+            _salt = f"{block_title}#{_i}"
+            rotated = self.differentiator.rotate(para, salt=_salt)
             self.differentiator.add_sentence(rotated)
             self.formatter.body(rotated)
 
@@ -294,14 +283,14 @@ class RichChapter:
         div_txt = '、'.join(divs[:2]) if divs else '各施工'
 
         openers = [
-            f'针对「{topic}」，{comp}结合{proj}的特点，制定了系统化的实施方案，明确目标、责任与节点。',
-            f'关于「{topic}」，我司将其作为本项目的重点管控环节，确保全过程可控、可追溯、可核查。',
-            f'在「{topic}」方面，{comp}依托类似工程经验与自有资源，建立了闭环管理机制并配套专项预案。',
-            f'对于「{topic}」，我司将在{proj}全周期内统筹部署，实行清单化、节点化管理。',
-            f'围绕「{topic}」的落实，{comp}坚持"策划先行、样板引路、过程严控"的工作思路。',
-            f'就「{topic}」而言，{comp}将其纳入项目全生命周期管理，前置策划、过程留痕、闭环验证。',
-            f'在「{topic}」的执行上，{comp}贯彻"标准化、精细化、信息化"的管理原则，确保实施有据可依。',
-            f'针对「{topic}」，我司以{proj}的实际工况为出发点，配置专职管理与作业力量。',
+            f'针对{topic}，{comp}结合{proj}的特点，制定了系统化的实施方案，明确目标、责任与节点。',
+            f'关于{topic}，我司将其作为本项目的重点管控环节，确保全过程可控、可追溯、可核查。',
+            f'在{topic}方面，{comp}依托类似工程经验与自有资源，建立了闭环管理机制并配套专项预案。',
+            f'对于{topic}，我司将在{proj}全周期内统筹部署，实行清单化、节点化管理。',
+            f'围绕{topic}的落实，{comp}坚持"策划先行、样板引路、过程严控"的工作思路。',
+            f'就{topic}而言，{comp}将其纳入项目全生命周期管理，前置策划、过程留痕、闭环验证。',
+            f'在{topic}的执行上，{comp}贯彻"标准化、精细化、信息化"的管理原则，确保实施有据可依。',
+            f'针对{topic}，我司以{proj}的实际工况为出发点，配置专职管理与作业力量。',
         ]
         bodies = [
             f'由{pm}（{pm_cert}）牵头组织专项小组，将相关要求分解到{div_txt}等环节，'
@@ -310,20 +299,20 @@ class RichChapter:
             f'可确保在{dur}内稳定落地。',
             f'实施中采用"方案编制—技术交底—过程检查—偏差纠偏"的递进式管控，关键节点设置量化验收标准，'
             f'全过程留存影像与书面记录以备核查。',
-            f'我司将与监理、业主建立定期沟通与联合检查机制，对「{topic}」的执行偏差做到早发现、早预警、早处置。',
+            f'我司将与监理、业主建立定期沟通与联合检查机制，对{topic}的执行偏差做到早发现、早预警、早处置。',
             f'同时将该项工作纳入智慧化工地管理平台，实现进度、质量、安全数据的实时采集与动态调度。',
             f'针对重点部位与关键工序编制专项作业指导书，组织交底与培训，确保一线作业人员掌握控制要点。',
             f'结合{proj}特点，我司编制专项实施方案，明确工艺流程、控制标准与应急预案，并组织全员技术交底。',
             f'在施工组织上实行"平面分区、立体交叉、专业流水"的作业组织，提升资源利用效率并削减窝工。',
-            f'我司建立周例会、月总结与专项协调会制度，对「{topic}」的进展与风险实行滚动跟踪与动态纠偏。',
+            f'我司建立周例会、月总结与专项协调会制度，对{topic}的进展与风险实行滚动跟踪与动态纠偏。',
             f'围绕本项工作建立责任矩阵与考核机制，将目标分解到岗、压力传导到人，确保闭环落地。',
         ]
         closers = [
-            f'上述安排已纳入我司投标承诺，中标后将形成专项实施方案报审，确保「{topic}」在{proj}中高标准落实。',
-            f'综上，我司有信心通过精细化组织，将「{topic}」的执行风险降至最低，保障整体工期与质量目标。',
-            f'该措施与项目总体部署协同推进，可为「{topic}」提供稳定、可靠的实施保障。',
-            f'该机制已在{comp}多个在施项目中稳定运行，可为「{topic}」在本项目的高标准履约提供保障。',
-            f'通过上述系统化安排，我司有信心将「{topic}」的建设标准与交付品质控制在预期目标之内。',
+            f'上述安排已纳入我司投标承诺，中标后将形成专项实施方案报审，确保{topic}在{proj}中高标准落实。',
+            f'综上，我司有信心通过精细化组织，将{topic}的执行风险降至最低，保障整体工期与质量目标。',
+            f'该措施与项目总体部署协同推进，可为{topic}提供稳定、可靠的实施保障。',
+            f'该机制已在{comp}多个在施项目中稳定运行，可为{topic}在本项目的高标准履约提供保障。',
+            f'通过上述系统化安排，我司有信心将{topic}的建设标准与交付品质控制在预期目标之内。',
         ]
         opener = openers[rng % len(openers)]
         body = bodies[(rng // 13) % len(bodies)]
@@ -533,7 +522,7 @@ class RichChapter:
 
     def _one_liner(self, item: str, ctx: Dict[str, Any]) -> str:
         comp = ctx.get('company_name', '我司')
-        return f'{comp}将严格落实「{item}」，并纳入专项管控清单全程跟踪。'
+        return f'{comp}将严格落实{item}，并纳入专项管控清单全程跟踪。'
 
     def _standard_sentence(self, topic: str, ctx: Dict[str, Any], rng: int) -> str:
         """引用真实 GB 国标条文（直击竞品'套话不专业'软肋）。数据源 professional_database.QUALITY_STANDARDS。"""
@@ -831,11 +820,17 @@ class RichChapter:
         if uc is not None:
             try:
                 comp = uc.get_company() or {}
-                ctx['company_name'] = comp.get('name') or '我司'
+                raw_name = comp.get('name') or ''
+                # ADR-009/ADR-007：demo 知识库名（示例/演示/某…）一律回退「我司」，
+                # 真实投标人名原样返回；彻底阻断「示例建设集团」落盘（封面已修，此处补 body）。
+                _demo_marks = ('示例', '演示', '样例', 'DEMO', '某', '待', '此处', 'TODO', 'XXXX', 'xxxx')
+                _is_demo = lambda v: bool(v) and any(k in v for k in _demo_marks)
+                ctx['company_name'] = '我司' if _is_demo(raw_name) else (raw_name or '我司')
                 quals = comp.get('qualifications') or []
                 ctx['quals_top'] = '、'.join(quals[:3]) if quals else ''
                 pm = uc.get_project_manager() or {}
-                ctx['pm_name'] = pm.get('name')
+                pm_name = pm.get('name') or ''
+                ctx['pm_name'] = None if _is_demo(pm_name) else (pm_name or None)
                 ctx['pm_cert'] = pm.get('cert')
                 sims = uc.get_similar_projects() or []
                 ctx['similar_top'] = sims[0].get('name') if sims else ''

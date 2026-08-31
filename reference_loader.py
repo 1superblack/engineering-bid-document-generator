@@ -40,16 +40,27 @@ class ReferenceLoader:
         self.style_patterns: List[str] = []
         self.outline: List[str] = []
         self._raw_text: str = ''
+        # C23: 加载状态（loaded / failed / empty / pending），不再静默吞异常
+        self.status: str = 'pending'
+        self.error: Optional[str] = None
+        self.error_type: Optional[str] = None
 
     # ────────────────────────────────────────────────────────────
     # 主入口
     # ────────────────────────────────────────────────────────────
     def load(self) -> 'ReferenceLoader':
-        """解析参考标书，填充 chapters / variables / style_patterns / outline。"""
+        """解析参考标书，填充 chapters / variables / style_patterns / outline。
+
+        C23: 任何解析异常均记录到 status/error（不再静默降级为空结构后无声失败），
+        调用方据 status 决定是否套用与提示。
+        """
         try:
             from docx import Document
             doc = Document(self.path)
         except Exception as exc:
+            self.status = 'failed'
+            self.error = str(exc)
+            self.error_type = type(exc).__name__
             log.warning('参考标书加载失败(已降级为空结构): %s', exc, exc_info=True)
             return self
 
@@ -60,9 +71,28 @@ class ReferenceLoader:
         self.outline = [c['title'] for c in self.chapters if c['level'] == 1]
         self.variables = self._extract_variables(self._raw_text)
         self.style_patterns = self._extract_style_patterns(self._raw_text)
-        log.info('参考标书解析完成: %d 个章节, %d 个变量, %d 条风格样本',
-                 len(self.chapters), len(self.variables), len(self.style_patterns))
+        self.status = 'loaded' if self.chapters else 'empty'
+        log.info('参考标书解析完成(status=%s): %d 个章节, %d 个变量, %d 条风格样本',
+                 self.status, len(self.chapters), len(self.variables), len(self.style_patterns))
         return self
+
+    def get_reference_guidance(self, new_project_info: Dict[str, Any]) -> Dict[str, Any]:
+        """C23: 返回结构化「以标写标」指引，供生成与后处理使用。
+
+        含加载状态、一级大纲、关键变量、风格样本与变量替换映射。
+        """
+        return {
+            'status': self.status,
+            'error': self.error,
+            'error_type': self.error_type,
+            'path': self.path,
+            'outline': list(self.outline),
+            'chapter_count': len(self.chapters),
+            'variables': dict(self.variables),
+            'style_patterns': list(self.style_patterns[:10]),
+            'variable_map': self.build_variable_map(new_project_info)
+            if self.status == 'loaded' else {},
+        }
 
     # ────────────────────────────────────────────────────────────
     # 章节结构提取

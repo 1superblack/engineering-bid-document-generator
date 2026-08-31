@@ -1,0 +1,18 @@
+name: engineering-bid-document-generator
+display_name: 工程标书生成器
+version: 9.4.0
+description: 工程标书一键生成：丢入招标文件（Word/PDF），自动解析评分项/星号条款/废标红线/资格要求并提取项目参数，按评分权重规划章节，一键生成可直接交付的技术标（docx）。内置废标风险自检、评分覆盖率报告、企业资质业绩响应，数据全程本地处理。
+category: 办公效率
+tags: [工程标书, 投标, 标书生成, 文档自动化, 技术标]
+author: 黑超人
+requires_api_key: false
+runtime:
+  language: python
+  version: ">=3.9"
+  dependencies:
+    - python-docx>=0.8.11
+    - python-pptx>=0.6.18
+    - lxml>=4.9.0
+    - pdfplumber>=0.10.0
+    - PyPDF2>=3.0.0
+    - matplotlib>=3.7.0

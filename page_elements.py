@@ -79,7 +79,7 @@ class PageElementsMixin:
 
         # 投标人信息（暗标模式不输出）
         if not getattr(self, 'is_dark_bid', False):
-            company = project_info.get('bidder_name') or project_info.get('bidder') or '（投标单位）'
+            company = project_info.get('bidder_name') or project_info.get('bidder') or '我司'
             date_str = project_info.get('bid_date', '二〇二六年   月')
 
             p = self.doc.add_paragraph()
@@ -131,15 +131,10 @@ class PageElementsMixin:
         fld_char2.set(qn('w:fldCharType'), 'separate')
         run._element.append(fld_char2)
 
-        run2 = paragraph.add_run('（请打开文档后按 Ctrl+A → F9 刷新目录）')
-        run2.font.name = self.body_font
-        run2.font.size = Pt(12)
-        run2.font.color.rgb = RGBColor(128, 128, 128)
-        run2._element.rPr.rFonts.set(qn('w:eastAsia'), self.body_font)
-
+        # v7.4: 不再在目录域中插入可见提示文字，避免生成文档出现“Ctrl+A F9”等提示词。
         fld_char3 = OxmlElement('w:fldChar')
         fld_char3.set(qn('w:fldCharType'), 'end')
-        run2._element.append(fld_char3)
+        run._element.append(fld_char3)
 
         self.doc.add_page_break()
 

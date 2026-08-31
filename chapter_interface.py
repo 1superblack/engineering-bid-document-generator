@@ -115,25 +115,27 @@ class ChapterInterface(ABC):
             bonus = strategy_info.get('bonus', [])
             common_omissions = strategy_info.get('common_omissions', [])
             structure_template = strategy_info.get('structure_template', '')
+            # v7.41: 默认不向正文输出加分项/常见遗漏等评审自检式内容
+            enable_bonus = bool(project_info.get('enable_bonus_omissions', False))
 
             if must_have and self.is_standard():
                 self.fmt.h3("核心响应要素")
                 for i, mh in enumerate(must_have, 1):
                     self.fmt.body(f"{i}、{mh}：我方将严格落实该项要求，确保在本工程中充分体现。")
 
-            if bonus and self.is_full():
+            if bonus and self.is_full() and enable_bonus:
                 self.fmt.h3("加分项响应")
                 for i, bn in enumerate(bonus, 1):
                     self.fmt.body(f"{i}、{bn}：我方将积极落实该项加分内容，提升标书竞争力。")
 
-            if common_omissions and self.is_full():
+            if common_omissions and self.is_full() and enable_bonus:
                 self.fmt.h3("常见遗漏防范")
                 self.fmt.body("针对本评分项，我方特别关注以下常见遗漏问题，确保逐一落实：")
                 for i, om in enumerate(common_omissions, 1):
                     self.fmt.body(f"{i}、{om}")
 
             if structure_template and self.is_standard():
-                self.fmt.body(f"本评分项内容按「{structure_template}」组织，确保结构完整、层次清晰。")
+                self.fmt.body(f"本评分项内容按{structure_template}组织，确保结构完整、层次清晰。")
 
         count = 0
         # 对每个sub_item: h3 + body承诺 + body措施概述
@@ -151,12 +153,12 @@ class ChapterInterface(ABC):
 
                 self.fmt.h3(si_name)
                 self.fmt.body(
-                    f"针对{project_name}「{name}」评分项中的「{si_name}」，"
+                    f"针对{project_name}{name}评分项中的{si_name}，"
                     f"我方郑重承诺：严格按照招标文件要求，"
                     f"全面落实相关标准和规范，确保该项得满分。"
                 )
                 self.fmt.body(
-                    f"我方将采取以下措施保障「{si_name}」的落实："
+                    f"我方将采取以下措施保障{si_name}的落实："
                     f"建立健全管理制度，明确责任分工，"
                     f"加强过程管控与监督检查，"
                     f"确保各项工作有序推进、按期达标。"
@@ -166,7 +168,7 @@ class ChapterInterface(ABC):
         # 如果没有子项，至少输出总体承诺
         if count == 0 and name:
             self.fmt.body(
-                f"针对评分项「{name}（{score}分）」，"
+                f"针对评分项{name}（{score}分），"
                 f"我方将严格按照招标文件要求，"
                 f"制定详细的实施方案和保障措施，确保该项得满分。"
             )
@@ -277,7 +279,7 @@ class ChapterInterface(ABC):
             
             # 如果没有子项但评分较高，生成通用内容
             if not sub_items and score >= 5 and self.is_standard():
-                self.fmt.body(f"针对评分项「{name}」，我方将严格按照招标文件要求，制定详细的实施方案和保障措施，确保该项得满分。")
+                self.fmt.body(f"针对评分项{name}，我方将严格按照招标文件要求，制定详细的实施方案和保障措施，确保该项得满分。")
         
         return True
 
@@ -371,7 +373,7 @@ class ChapterInterface(ABC):
             f"我方承诺建立健全质量管理制度，包括但不限于：原材料进场检验制度、"
             f"施工过程质量检查制度、隐蔽工程验收制度、技术交底制度、"
             f"工序交接检查制度、质量例会制度等。"
-            f"严格执行「三检制」（自检、互检、专检），确保每道工序质量合格后方可进入下道工序施工。"
+            f"严格执行三检制（自检、互检、专检），确保每道工序质量合格后方可进入下道工序施工。"
             f"对关键工序和特殊过程实行重点监控，设立质量控制点，实施旁站监理。",
 
             f"我方承诺加强原材料和半成品的质量控制，所有进场材料必须有合格证、质量证明文件，"
@@ -382,7 +384,7 @@ class ChapterInterface(ABC):
             f"我方承诺加强施工过程中的质量监控，采用先进的检测手段和方法，"
             f"对施工质量进行全过程、全方位监控。"
             f"定期组织质量检查和质量分析会议，及时发现和纠正质量问题。"
-            f"对质量缺陷和质量事故严格按照「四不放过」原则进行处理，"
+            f"对质量缺陷和质量事故严格按照四不放过原则进行处理，"
             f"即原因未查清不放过、责任人未处理不放过、整改措施未落实不放过、有关人员未受到教育不放过。",
 
             f"我方承诺建立完善的质量档案管理制度，施工过程中及时收集、整理、归档各类质量文件和记录，"
@@ -398,7 +400,7 @@ class ChapterInterface(ABC):
         self.fmt.h2("安全保证承诺")
         safety_paragraphs = [
             f"我方郑重承诺：{pn}施工期间严格遵守《中华人民共和国安全生产法》《建设工程安全生产管理条例》"
-            f"等法律法规，坚决贯彻「安全第一、预防为主、综合治理」的安全生产方针，"
+            f"等法律法规，坚决贯彻安全第一、预防为主、综合治理的安全生产方针，"
             f"杜绝重大安全事故的发生，确保安全生产零事故目标。"
             f"我方将建立以项目经理为第一责任人的安全生产责任制，"
             f"层层签订安全生产责任书，明确各级人员的安全生产职责。",
@@ -411,16 +413,16 @@ class ChapterInterface(ABC):
             f"施工现场配备足够数量的专职安全管理人员，负责日常安全检查和监督工作。",
 
             f"我方承诺加强施工现场安全防护，严格执行JGJ 59《建筑施工安全检查标准》，"
-            f"确保「三宝」（安全帽、安全带、安全网）的正确使用，"
-            f"做好「四口」（楼梯口、电梯井口、预留洞口、通道口）和「五临边」（基坑周边、"
+            f"确保三宝（安全帽、安全带、安全网）的正确使用，"
+            f"做好四口（楼梯口、电梯井口、预留洞口、通道口）和五临边（基坑周边、"
             f"尚未安装栏杆或栏板的阳台及料台与挑平台周边、雨篷与挑檐边、"
             f"无外脚手架的屋面与楼层周边、水箱与水塔周边）的安全防护。"
             f"对脚手架、模板支撑体系、深基坑、起重吊装等危险性较大的分部分项工程，"
             f"编制专项施工方案并按规定组织专家论证。",
 
             f"我方承诺加强施工用电安全管理，严格执行JGJ 46《施工现场临时用电安全技术规范》，"
-            f"采用TN-S接零保护系统，做到「三级配电两级保护」，"
-            f"实行「一机一闸一漏一箱」制度。"
+            f"采用TN-S接零保护系统，做到三级配电两级保护，"
+            f"实行一机一闸一漏一箱制度。"
             f"加强消防安全管理，按规定配备消防器材，设置消防通道，"
             f"建立动火审批制度，定期进行消防安全检查和消防演练。",
 
@@ -446,7 +448,7 @@ class ChapterInterface(ABC):
             f"生活区与施工区严格分隔，生活设施齐全、卫生整洁。",
 
             f"我方承诺做好施工现场的宣传和标识工作，"
-            f"在施工现场醒目位置设置「五牌一图」（工程概况牌、管理人员名单及监督电话牌、"
+            f"在施工现场醒目位置设置五牌一图（工程概况牌、管理人员名单及监督电话牌、"
             f"消防保卫牌、安全生产牌、文明施工牌和施工现场平面图），"
             f"施工区域设置安全警示标志和宣传标语。"
             f"加强施工现场的治安管理，建立门卫制度，实行来访登记。"
@@ -473,7 +475,7 @@ class ChapterInterface(ABC):
             f"《中华人民共和国噪声污染防治法》等法律法规，"
             f"严格执行GB 12523《建筑施工场界环境噪声排放标准》等环保标准，"
             f"认真落实环境影响评价文件及审批意见中的各项环保措施。"
-            f"坚持「预防为主、综合治理」的环保方针，最大限度减少施工对周边环境的影响。",
+            f"坚持预防为主、综合治理的环保方针，最大限度减少施工对周边环境的影响。",
 
             f"我方承诺做好以下环保工作："
             f"（1）扬尘控制：施工现场采取洒水降尘、覆盖防尘、封闭运输等措施，"
@@ -553,6 +555,17 @@ class ChapterInterface(ABC):
             # 补充default中的条目
             default_extra = [s for s in _STANDARDS_DB['default'] if s not in standards]
             standards = standards + default_extra[:8 - len(standards)]
+
+        # v8.9: 全文强制性通用规范(GB 550 系列,2021-2025)为所有工程底线合规依据，
+        # 在每个引用标准表中优先纳入前 3 条，确保成果引用现行最新强条。
+        _mandatory = _STANDARDS_DB.get('强条通用', [])
+        if _mandatory:
+            _seen = {c for c, _ in standards}
+            _pre = [s for s in _mandatory[:3] if s[0] not in _seen]
+            if _pre:
+                standards = _pre + standards
+                if len(standards) > 15:
+                    standards = standards[:15]
 
         self.fmt.h2("主要引用标准及规范")
         self.fmt.body(

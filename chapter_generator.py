@@ -194,7 +194,7 @@ class ChapterGenerator:
         if layers:
             for layer in layers:
                 formatter.h2(layer)
-                formatter.body(f'我司将围绕「{layer}」制定专项实施方案，确保本环节可控、可追溯、可核查。')
+                formatter.body(f'我司将围绕{layer}制定专项实施方案，确保本环节可控、可追溯、可核查。')
         elif must_have:
             formatter.h2('主要内容')
         else:
@@ -205,12 +205,14 @@ class ChapterGenerator:
             for item in must_have[:max(3, detail_level * 2)]:
                 formatter.body(f'• {item}')
 
-        if bonus:
+        # v7.41: 加分项策划 / 常见扣分规避默认关闭，避免正文出现评审自检式标题
+        enable_bonus = bool(self.project_info.get('enable_bonus_omissions', False))
+        if bonus and enable_bonus:
             formatter.h2('加分项策划')
             for item in bonus[:max(2, detail_level)]:
                 formatter.body(f'• {item}')
 
-        if common_omissions and detail_level >= 3:
+        if common_omissions and detail_level >= 3 and enable_bonus:
             formatter.h2('常见扣分规避')
             for item in common_omissions[:detail_level]:
                 formatter.body(f'• {item}')
@@ -288,3 +290,116 @@ def generate_single_chapter(req: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as exc:
         log.error('单章节生成失败: %s', exc, exc_info=True)
         return {'success': False, 'message': f'生成失败：{exc}'}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# T8 · 章节级局部唤醒 + 上下文预览
+# Skill 形态下交互受宿主限制，完整编辑 UI 留给桌面端扩展缝；
+# 此处提供「能力层」：给定章节标题，可①预览其在全文中的上下文（相邻章节+摘要），
+# ②带评分/红线硬约束重新生成该章（本地唤醒），供用户就地改、就地补。
+# ═══════════════════════════════════════════════════════════════════════════
+def preview_chapter_context(doc_path: str, title: str, window: int = 1) -> Dict[str, Any]:
+    """返回某章节在全文中的上下文预览（相邻章节标题 + 本章摘要）。
+
+    纯只读，不修改文档。用于「局部唤醒」时让用户先看清楚改哪、前后是什么。
+    """
+    try:
+        from docx import Document
+        doc = Document(doc_path)
+    except Exception as exc:  # noqa: BLE001
+        return {'found': False, 'error': str(exc)}
+
+    paras = doc.paragraphs
+    # 收集所有标题及其位置
+    heads = []
+    for i, p in enumerate(paras):
+        st = (p.style.name if p.style else '') if p.style else ''
+        if st.startswith('Heading'):
+            heads.append((i, (p.text or '').strip()))
+    # 定位当前章（标题包含 title 的标题段落）
+    cur_pos = -1
+    for pos, (i, t) in enumerate(heads):
+        if title in t:
+            cur_pos = pos
+            break
+    if cur_pos < 0:
+        # 退化：任意段落含 title 也尝试
+        for i, p in enumerate(paras):
+            if title in (p.text or ''):
+                # 找最近的上一标题
+                for pos, (hi, ht) in enumerate(heads):
+                    if hi < i:
+                        cur_pos = pos
+                break
+    if cur_pos < 0:
+        return {'found': False, 'message': '未在文档中找到该章节标题'}
+
+    cur_idx, cur_title = heads[cur_pos]
+    prev_title = heads[cur_pos - 1][1] if cur_pos > 0 else None
+    next_title = heads[cur_pos + 1][1] if cur_pos < len(heads) - 1 else None
+    # 本章摘要：标题之后直到下一标题的正文
+    snippet = []
+    j = cur_idx + 1
+    while j < len(paras):
+        st = (paras[j].style.name if paras[j].style else '') if paras[j].style else ''
+        if st.startswith('Heading'):
+            break
+        t = (paras[j].text or '').strip()
+        if t:
+            snippet.append(t)
+        j += 1
+    return {
+        'found': True,
+        'title': cur_title,
+        'prev': prev_title,
+        'next': next_title,
+        'snippet': snippet[:5],
+    }
+
+
+def awaken_chapter(req: Dict[str, Any]) -> Dict[str, Any]:
+    """T8 主入口：章节级局部唤醒。
+
+    组合三件事：
+    1) 复用 ChapterGenerator 带约束重生成该章（markdown）；
+    2) 若提供 context_doc，返回该章在全文中的上下文预览；
+    3) 若提供 parse_result，返回评分项/废标红线硬约束（供 LLM 扩写注入）。
+
+    返回 {success, chapter_title, markdown, context_preview, constraints}。
+    """
+    title = req.get('chapter_title') or req.get('chapterTitle')
+    if not title:
+        return {'success': False, 'message': '缺少 chapter_title 参数'}
+    gen = ChapterGenerator(
+        parse_result=req.get('parse_result'),
+        user_context=req.get('user_context'),
+        bid_type=req.get('bid_type', 'construction'),
+        project_info=req.get('project_info') or req,
+        llm_client=req.get('llm_client'),
+    )
+    try:
+        md = gen.generate_markdown(title, detail_level=req.get('detail_level', 3))
+    except Exception as exc:
+        log.error('章节唤醒生成失败: %s', exc, exc_info=True)
+        return {'success': False, 'message': f'生成失败：{exc}'}
+
+    preview = None
+    if req.get('context_doc'):
+        preview = preview_chapter_context(req['context_doc'], title)
+
+    constraints = None
+    pr = req.get('parse_result')
+    if pr:
+        try:
+            from pipeline.tech_opt import build_generation_constraints
+            constraints = build_generation_constraints(pr)
+        except Exception:  # noqa: BLE001
+            constraints = None
+
+    return {
+        'success': True,
+        'chapter_title': title,
+        'markdown': md,
+        'context_preview': preview,
+        'constraints': constraints,
+    }

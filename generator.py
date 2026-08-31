@@ -4,9 +4,13 @@ TechnicalBidGenerator - 技术标生成器 v7.4
 v7.4 重构: 数据定义已分离至 table_data.py 和 work_content_maps.py
 """
 import os
+import re
 from typing import Dict, List, Tuple
 
 from docx import Document
+from docx.shared import Pt, RGBColor, Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
 
 from bid_core.base_generator import BaseGenerator
 from bid_core.formatter import NormalFormatter
@@ -15,6 +19,7 @@ from bid_core.user_context import UserContext
 from bid_technical.scoring_strategy import ScoringStrategy
 from bid_technical.evaluator_check import EvaluatorCheck
 from bid_core.logger import get_logger
+from pipeline.output_paths import aux_path
 
 # 从独立模块导入数据定义
 from table_data import (
@@ -41,7 +46,7 @@ class TechnicalBidGenerator(BaseGenerator):
                  formatter=None, randomizer=None, user_context=None,
                  heading_font=None, body_font=None,
                  detail_level=2, parse_result=None,
-                 enable_deviation_table=True,
+                 enable_deviation_table=False,
                  enable_risk_grading=True,
                  enable_mock_review=True,
                  llm_client=None, differentiator=None):
@@ -105,6 +110,21 @@ class TechnicalBidGenerator(BaseGenerator):
             self.chapters = [{"title": c, "keywords": []} for c in chapters]
 
         self.target_pages = target_pages
+
+        # v7.40: 补充段封顶改为可配置（默认沿用旧值，保证小标书行为不变；
+        # 大标书可通过 project_info / user_context 抬高以撑满目标页数）。
+        # - per_chapter_fill_cap: 每章补充段上限
+        # - global_fill_cap: 全局补充段上限
+        # - fill_para_per_page: 估算「每页需补多少段」用于按 shortfall 预算分配
+        # 读取优先级：project_info > user_context > 默认值（兼容运行脚本把参数放在
+        # user_context 中、而管线未将其灌入 project_info 的情况）。
+        _uc = user_context if isinstance(user_context, dict) else {}
+        self.per_chapter_fill_cap = int(
+            project_info.get('per_chapter_fill_cap', _uc.get('per_chapter_fill_cap', 8)))
+        self.global_fill_cap = int(
+            project_info.get('global_fill_cap', _uc.get('global_fill_cap', 500)))
+        self.fill_para_per_page = int(
+            project_info.get('fill_para_per_page', _uc.get('fill_para_per_page', 10)))
 
         # 设置附表（深拷贝，防止污染全局TABLES/SERVICE_TABLES）
         if self.bid_type == 'service':
@@ -347,56 +367,165 @@ class TechnicalBidGenerator(BaseGenerator):
         return int(estimated)
 
     def _fill_content_to_target(self, shortfall, chapters_to_render):
-        """当已渲染内容不足时，补充额外表格和段落
+        """内容不足时补充表格与段落，按章节分散插入（修正单章爆炸 bug）。
 
-        策略：
-        1. 优先补充补充表格（施工类/服务类均有大量可扩充表格）
-        2. 对高分章节追加详细说明段落
-        3. 确保不破坏已有章节结构
+        旧实现把所有补充段无差别追加到文档末尾，而末章 H1 之后即为其落点，
+        导致全部补充内容被计入最后一章（如第十三章达 900+ 段、几十页）。
+        新实现：
+        1. 仅对正文主章节（附表之前）做补充；
+        2. 每章补充段数封顶（PER_CHAPTER_CAP），全局封顶（GLOBAL_CAP）；
+        3. 通过 insert_paragraph_before(下一章 H1) 把补充段插到本章程尾，
+           分散到各章，杜绝集中到末章造成单章几百页。
         """
-        import math
         name = self.project_info.get('name', '本项目')
+        plan_target = self.plan.get('total_pages', 0) if getattr(self, 'plan', None) else 0
+        if plan_target <= 0 or not chapters_to_render:
+            return
 
-        # ── 补充表格 ──
-        # 构建补充表格数据（施工类和服务类分别处理）
+        para_list = self.doc.paragraphs
+        # 注意：本方法在 render_tables（生成附表 H1）之前调用，
+        # 因此此时文档中仅有 13 个正文章节 H1，附表尚未生成。
+        all_h1 = [i for i, p in enumerate(para_list) if p.style.name == 'Heading 1']
+        if not all_h1:
+            return
+
+        # ── 补充表格（有限，避免无限膨胀）──
         supplement_tables = self._build_supplement_tables()
-        tables_to_add = min(len(supplement_tables), max(1, int(shortfall / 3)))
+        tables_to_add = min(len(supplement_tables), 3, max(0, int(shortfall / 6)))
         for i in range(tables_to_add):
-            if i < len(supplement_tables):
-                st = supplement_tables[i]
-                self.formatter.h2(f"附表 补-{i+1} {st['title']}")
-                self.formatter.body(f"工程名称：{name}")
-                if 'hdrs' in st and 'rows' in st:
-                    rows = [[str(j)] + row for j, row in enumerate(st['rows'], 1)]
-                    self.formatter.table(st['hdrs'], rows)
-                self.formatter.body("")
+            st = supplement_tables[i]
+            self.formatter.h2(f"附表 补-{i + 1} {st['title']}")
+            self.formatter.body(f"工程名称：{name}")
+            if 'hdrs' in st and 'rows' in st:
+                rows = [[str(j)] + row for j, row in enumerate(st['rows'], 1)]
+                self.formatter.table(st['hdrs'], rows)
+            self.formatter.body("")
 
-        # ── 补充段落 — 对高分章节追加详细说明 ──
-        remaining_shortfall = shortfall - tables_to_add * 3
-        if remaining_shortfall > 0 and chapters_to_render:
-            # 按score_weight排序，优先补充高分章节
-            sorted_chapters = sorted(
-                chapters_to_render,
-                key=lambda c: c.get('plan_info', {}).get('score_weight', 0),
-                reverse=True
-            )
-            # 每个高分章节补充若干段落
-            paragraphs_per_chapter = max(5, int(remaining_shortfall / max(len(sorted_chapters), 1)))
-            supplement_templates = self._build_supplement_paragraphs()
-            for idx, ch_info in enumerate(sorted_chapters):
-                if remaining_shortfall <= 0:
-                    break
-                n_paras = min(paragraphs_per_chapter, remaining_shortfall * 2)
-                title = ch_info['title']
-                self.formatter.h2(f"{title} — 补充说明")
-                for p_idx in range(n_paras):
-                    if p_idx < len(supplement_templates):
-                        text = supplement_templates[p_idx].replace('{title}', title).replace('{name}', name)
-                    else:
-                        # 模板用尽时循环复用，绝不输出"N、…"式序号前缀（避免正文出现序号噪音）
-                        text = supplement_templates[p_idx % len(supplement_templates)].replace('{title}', title).replace('{name}', name)
-                    self.formatter.body(text)
-                remaining_shortfall -= max(1, n_paras // 2)
+        # ── 按章分散补段落（插到本章程尾，封顶；v7.40 改为按 shortfall 预算驱动）──
+        PER_CHAPTER_CAP = self.per_chapter_fill_cap
+        GLOBAL_CAP = self.global_fill_cap
+        PARA_PER_PAGE = max(1, self.fill_para_per_page)
+        # v7.42: LLM 扩写填充（云端+脱敏 / 本地）。有客户端且开关开启时，用「角度化要点」
+        # 调用 expand_section 替换八股模板，根治逐字重复；单次失败/超预算立即回退模板。
+        # 注意：expand_section 按 (标题, 要点, ctx) 缓存，故每次要点必须不同，否则返回重复文本。
+        LLM_FILL_BUDGET = int(self.project_info.get('llm_fill_call_budget', 400))
+        enable_llm_fill = bool(self.llm_client) and bool(
+            self.project_info.get('enable_llm_fill', True))
+        titles = [c.get('title', '') for c in chapters_to_render]
+        openers = [
+            '关于{t}，我司结合{name}的实际情况进一步细化管控措施，确保全过程可控、可追溯、可核查。',
+            '在{t}方面，我司建立清单化、节点化的管理机制，将目标分解到岗、责任传导到人。',
+            '针对{t}，我司组织专项技术交底与培训，确保一线作业人员掌握控制要点与验收标准。',
+            '围绕{t}的落实，我司实行"策划先行、样板引路、过程严控"，关键工序编制专项作业指导书。',
+            '对于{t}，我司与监理、业主建立定期联合检查机制，对执行偏差早发现、早预警、早处置。',
+            '就{t}而言，我司将其纳入项目全生命周期管理，前置策划、过程留痕、闭环验证。',
+            '在{t}的执行上，我司贯彻"标准化、精细化、信息化"的管理原则，确保实施有据可依。',
+            '针对{t}，我司以{name}的实际工况为出发点，配置专职管理与作业力量。',
+        ]
+        # 角度池：每次填充调用喂入不同角度，既让 LLM 产出差异化正文，又避免命中缓存返回重复文本
+        ANGLES = [
+            "从组织架构与责任分工角度展开",
+            "从关键施工工艺与技术路线角度展开",
+            "从质量管控与检验批验收角度展开",
+            "从安全生产与应急管理体系角度展开",
+            "从进度节点与资源配置计划角度展开",
+            "从文明施工与环境保护角度展开",
+            "从风险预控与应急预案角度展开",
+            "从材料设备管理与进场检验角度展开",
+            "从信息化与BIM协同应用角度展开",
+            "从样板引路与工序三检角度展开",
+            "从成本意识与绿色施工角度展开",
+            "从劳务管理与技能培训角度展开",
+        ]
+        # 预算：需补充的段落总数 = shortfall(页) × 每页段数，再按章均分（封顶保护）
+        num_ch = max(1, len(all_h1))
+        total_needed = max(0, int(shortfall * PARA_PER_PAGE))
+        per_ch = max(1, (total_needed + num_ch - 1) // num_ch)  # 向上取整均分
+        per_ch = min(per_ch, PER_CHAPTER_CAP)
+        total_needed = min(total_needed, GLOBAL_CAP)
+        added = 0
+        llm_calls = 0
+        for ci in range(len(all_h1)):
+            if added >= total_needed:
+                break
+            # 下一章 H1 作为本章程尾插入点；末章插到文档末尾（后续附表自然接后）
+            nxt_obj = para_list[all_h1[ci + 1]] if ci + 1 < len(all_h1) else None
+            title = titles[ci] if ci < len(titles) else para_list[all_h1[ci]].text.strip()
+            in_ch = 0
+            while in_ch < per_ch and added < total_needed:
+                salt = f"{title}#fill{added}"
+                # —— LLM 扩写优先 ——
+                llm_text = None
+                if enable_llm_fill and llm_calls < LLM_FILL_BUDGET:
+                    angle = ANGLES[added % len(ANGLES)]
+                    try:
+                        llm_text = self.llm_client.expand_section(
+                            title, [angle], self.project_info, self.parse_result)
+                    except Exception:
+                        llm_text = None
+                    if llm_text:
+                        llm_calls += 1
+                if llm_text:
+                    sub = [p.strip() for p in re.split(r'\n\s*\n', llm_text) if p.strip()]
+                    if not sub:
+                        sub = [llm_text.strip()]
+                    for sp in sub:
+                        if added >= total_needed or in_ch >= per_ch:
+                            break
+                        rotated = self.differentiator.rotate(sp, salt=f"{salt}#{in_ch}")
+                        self.differentiator.add_sentence(rotated)
+                        self._insert_filler_para(nxt_obj, rotated)
+                        added += 1
+                        in_ch += 1
+                    continue  # 本段预算已由 LLM 填充，跳过模板分支
+                # —— 模板回退（LLM 不可用/失败/超额）——
+                text = openers[added % len(openers)].format(t=title, name=name)
+                rotated = self.differentiator.rotate(text, salt=salt)
+                self.differentiator.add_sentence(rotated)
+                self._insert_filler_para(nxt_obj, rotated)
+                added += 1
+                in_ch += 1
+
+    def _insert_filler_para(self, nxt_obj, text: str) -> None:
+        """在章节 H1 前（或文档末尾）插入一段填充正文，统一字体/对齐格式。
+
+        v7.42：显式强制 LEFT 对齐，防止继承 Normal 样式的 JUSTIFY/DISTRIBUTE
+        把中文拉伸（双重保险，DocxSanitizeStage._force_all_left 会再扫一遍）。
+        """
+        if nxt_obj is not None:
+            new_p = nxt_obj.insert_paragraph_before(text)
+        else:
+            new_p = self.doc.add_paragraph(text)
+        try:
+            new_p.style = self.doc.styles['Normal']
+        except Exception:
+            pass
+        if new_p.runs:
+            rr = new_p.runs[0]
+            rr.font.name = self.formatter.body_font
+            rr.font.size = Pt(12)
+            rr.font.color.rgb = RGBColor(0, 0, 0)
+            rr._element.rPr.rFonts.set(qn('w:eastAsia'), self.formatter.body_font)
+        new_p.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        new_p.paragraph_format.first_line_indent = Cm(0.85)
+        new_p.paragraph_format.line_spacing = Pt(28)
+        new_p.paragraph_format.space_before = Pt(0)
+        new_p.paragraph_format.space_after = Pt(2)
+
+    def _append_supplement_paragraphs(self, title, n):
+        """ADR-007: 围绕章节标题补写 n 段通用但项目相关的说明，用于撑满目标页数。"""
+        proj = self.project_info.get('name', '本工程')
+        comp = '我司'
+        openers = [
+            f'关于{title}，{comp}结合{proj}的实际情况进一步细化管控措施，确保全过程可控、可追溯、可核查。',
+            f'在{title}方面，{comp}建立清单化、节点化的管理机制，将目标分解到岗、责任传导到人。',
+            f'针对{title}，{comp}组织专项技术交底与培训，确保一线作业人员掌握控制要点与验收标准。',
+            f'围绕{title}的落实，{comp}实行"策划先行、样板引路、过程严控"，关键工序编制专项作业指导书。',
+            f'对于{title}，{comp}与监理、业主建立定期联合检查机制，对执行偏差早发现、早预警、早处置。',
+            f'就{title}而言，{comp}将其纳入项目全生命周期管理，前置策划、过程留痕、闭环验证。',
+        ]
+        for i in range(n):
+            self.formatter.body(openers[i % len(openers)])
 
     def _build_supplement_tables(self):
         """构建补充表格数据（v6.0新增）"""
@@ -513,7 +642,7 @@ class TechnicalBidGenerator(BaseGenerator):
             return [
                 "在{title}方面，我方将严格执行国家现行施工规范和验收标准，确保{title}的各项指标满足设计要求和规范规定，为{name}的顺利实施提供坚实保障。",
                 "针对{title}，我方编制了详细的施工方案和技术措施，明确了施工工艺流程、质量控制要点和安全防护措施，确保施工全过程规范有序。",
-                "为确保{title}的施工质量，我方将实行「三检制」（自检、互检、专检），严把每道工序质量关，做到上道工序不合格不进入下道工序。",
+                "为确保{title}的施工质量，我方将实行三检制（自检、互检、专检），严把每道工序质量关，做到上道工序不合格不进入下道工序。",
                 "在{title}施工过程中，我方将加强技术交底工作，确保每名作业人员都熟悉施工方法和质量要求，做到人人心中有标准、手中有规范。",
                 "我方将定期对{title}进行质量检查和安全巡查，对发现的问题立即整改，确保施工质量和安全始终处于受控状态，杜绝质量安全隐患。",
                 "针对{title}的特殊施工条件，我方已制定专项施工方案和应急预案，确保在不利条件下的施工安全和工程质量，保障{name}按期交付。",
@@ -676,7 +805,14 @@ class TechnicalBidGenerator(BaseGenerator):
                 {'name': '电焊机', 'model': 'BX3-300', 'count': max(3, area // 3000)},
                 {'name': '木工圆锯', 'model': 'MJ104', 'count': max(2, area // 4000)},
             ]
-        rows = [[e.get('name', ''), e.get('model', '-'), str(e.get('count', 1))] for e in eq[:12]]
+        # 兼容两种数据格式：dict 列表（{name,model,count}）或纯字符串列表（如用户直填设备名）
+        def _eq_row(e):
+            if isinstance(e, str):
+                return [e, '-', '1']
+            if isinstance(e, dict):
+                return [e.get('name', ''), e.get('model', '-'), str(e.get('count', 1))]
+            return ['', '-', '1']
+        rows = [_eq_row(e) for e in eq[:12]]
         self.formatter.add_heading('主要施工设备投入计划')
         self.formatter.table(['设备名称', '规格型号', '数量'], rows)
         self.formatter.body('注：主要机械设备进场报验、一用一备，按进度动态调配，确保不因设备原因影响工期。')
@@ -832,7 +968,7 @@ class TechnicalBidGenerator(BaseGenerator):
             # 如果有评分项，为每个评分项获取content_strategy
             content_strategies = []
             for item in score_items:
-                weight = item.get('score', 0)
+                weight = item.get('score') or 0  # 防御：score 可能为 None
                 cs = strategy.get_content_strategy(chapter_title, item, weight)
                 content_strategies.append({
                     'score_item': item.get('name') or item.get('title', ''),
@@ -981,7 +1117,7 @@ class TechnicalBidGenerator(BaseGenerator):
         try:
             from pathlib import Path
             out = Path(output_path)
-            report_path = out.with_name(out.stem + '_评审报告.md')
+            report_path = aux_path(None, output_path, '_评审报告.md')
             parts = [
                 '# 标书评审报告',
                 '',
